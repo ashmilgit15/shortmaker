@@ -1,0 +1,8 @@
+--index-url https://pypi.org/simple
+
+-r requirements.txt
+
+# Local fallback ASR (optional)
+torch
+torchaudio
+openai-whisper==20250625

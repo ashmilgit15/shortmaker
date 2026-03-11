@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: shortmaker
+    runtime: docker
+    region: oregon
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: SHORTMAKER_AUTH_MODE
+        value: production
+      - key: SHORTMAKER_ADMIN_TOKEN
+        value: "replace-with-admin-secret-before-deploy"
+      - key: GEMINI_API_KEY
+        value: "replace-with-gemini-key-before-deploy"
+      - key: GROQ_API_KEY
+        value: "replace-with-groq-key-before-deploy"

@@ -1,0 +1,41 @@
+INFO:     127.0.0.1:62638 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49808 - "POST /api-keys HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49809 - "GET /auth/mode HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49810 - "GET /capabilities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49811 - "GET /ai/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49812 - "POST /ai/validate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49814 - "POST /trends/discover HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51593 - "POST /process/upload HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51596 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51086 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59290 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59293 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+
+Generating short 1/1
+  Time: 43.0s - 102.3s
+  Reason: question
+Running FFmpeg render: C:\ffmpeg\ffmpeg-8.0.1-essentials_build\bin\ffmpeg.EXE -y -ss 43.040 -i C:\Users\Ashmil P\Desktop\shortmaker\outputs\temp\0bbc285f-bdc7-449d-be06-e68385ed2049\source.mp4 -t 59.272 -filter_complex [0:v]split=2[bgsrc][fgsrc];[bgsrc]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=24:3,eq=saturation=1.08:contrast=1.04:brightness=-0.02[bg];[fgsrc]scale=1015:1420:force_original_aspect_ratio=decrease,eq=saturation=1.12:contrast=1.07:brightness=0.01,unsharp=5:5:0.8:3:3:0.4[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2-110:format=auto,subtitles=filename='C\:/Users/Ashmil P/Desktop/shortmaker/outputs/shorts/0bbc285f_short_1.ass':original_size=1080x1920:fontsdir='C\:/windows/Fonts',fps=30,setsar=1,format=yuv420p[v] -map [v] -map 0:a:0? -c:a aac -b:a 192k -af loudnorm=I=-14:TP=-1.5:LRA=11 -c:v libx264 -preset medium -crf 16 -threads 0 -profile:v high -level:v 4.2 -pix_fmt yuv420p -movflags +faststart C:\Users\Ashmil P\Desktop\shortmaker\outputs\shorts\0bbc285f_short_1.mp4
+INFO:     127.0.0.1:63906 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56267 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56268 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49406 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49668 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49670 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49671 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49674 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49676 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49677 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53233 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53234 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53235 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53236 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53237 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53238 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53239 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53241 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53242 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+  Saved: C:\Users\Ashmil P\Desktop\shortmaker\outputs\shorts\0bbc285f_short_1.mp4 (94.9s)
+INFO:     127.0.0.1:65084 - "GET /status/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65085 - "GET /result/0bbc285f-bdc7-449d-be06-e68385ed2049 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65086 - "GET /shorts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65087 - "GET /shorts/0bbc285f_short_1.mp4 HTTP/1.1" 200 OK
