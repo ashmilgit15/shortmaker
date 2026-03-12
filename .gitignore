@@ -1,10 +1,21 @@
 .env.json
+.env
+.env.local
+frontend/.env.local
 outputs/
-node_modules
-dist
+node_modules/
+dist/
 coverage
+__pycache__/
+*.py[cod]
 *.log
+*.err.log
+*.out.log
 *.tsbuildinfo
+.venv/
+venv/
+.zencoder/
+.zenflow/
 .idea
 
     

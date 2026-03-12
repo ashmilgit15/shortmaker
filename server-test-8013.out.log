@@ -1,45 +1,0 @@
-INFO:     127.0.0.1:53980 - "GET /ashmil2010/capabilities HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53981 - "POST /ashmil2010/process HTTP/1.1" 200 OK
-[youtube] Extracting URL: https://www.youtube.com/watch?v=HlBesuNG2pE
-[youtube] HlBesuNG2pE: Downloading webpage
-[youtube] HlBesuNG2pE: Downloading android vr player API JSON
-[youtube] HlBesuNG2pE: Downloading web safari player API JSON
-[youtube] HlBesuNG2pE: Downloading player e42f4bf8-tv
-[youtube] [jsc:node] Solving JS challenges using node
-[info] HlBesuNG2pE: Downloading 1 format(s): 398+140
-[download] Destination: C:\Users\Ashmil P\Desktop\shortmaker\outputs\temp\bccdb4e8-2969-4c48-94c3-9c8d9173354d\HlBesuNG2pE.f398.mp4
-[download]   0.0% of   12.27MiB at   72.86KiB/s ETA 02:52[download]   0.0% of   12.27MiB at  203.75KiB/s ETA 01:01[download]   0.1% of   12.27MiB at  445.05KiB/s ETA 00:28[download]   0.1% of   12.27MiB at  896.18KiB/s ETA 00:14[download]   0.2% of   12.27MiB at    1.62MiB/s ETA 00:07[download]   0.5% of   12.27MiB at    1.97MiB/s ETA 00:06[download]   1.0% of   12.27MiB at    2.14MiB/s ETA 00:05INFO:     127.0.0.1:53987 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-[download]   2.0% of   12.27MiB at    1.84MiB/s ETA 00:06[download]   4.1% of   12.27MiB at    2.20MiB/s ETA 00:05[download]   8.1% of   12.27MiB at    3.29MiB/s ETA 00:03[download]  16.3% of   12.27MiB at    4.31MiB/s ETA 00:02[download]  32.6% of   12.27MiB at    4.79MiB/s ETA 00:01[download]  65.2% of   12.27MiB at    5.44MiB/s ETA 00:00[download]  80.7% of   12.27MiB at    5.44MiB/s ETA 00:00[download]  80.7% of   12.27MiB at  495.08KiB/s ETA 00:04[download]  80.8% of   12.27MiB at  841.22KiB/s ETA 00:02[download]  80.8% of   12.27MiB at    1.50MiB/s ETA 00:01[download]  80.9% of   12.27MiB at    3.21MiB/s ETA 00:00[download]  81.0% of   12.27MiB at    5.44MiB/s ETA 00:00[download]  81.2% of   12.27MiB at    6.07MiB/s ETA 00:00[download]  81.7% of   12.27MiB at    7.70MiB/s ETA 00:00[download]  82.8% of   12.27MiB at    7.70MiB/s ETA 00:00[download]  84.8% of   12.27MiB at    7.84MiB/s ETA 00:00[download]  88.9% of   12.27MiB at    5.45MiB/s ETA 00:00[download]  97.0% of   12.27MiB at    6.50MiB/s ETA 00:00[download] 100.0% of   12.27MiB at    6.54MiB/s ETA 00:00[download] 100% of   12.27MiB in 00:00:02 at 4.89MiB/s   
-[download] Destination: C:\Users\Ashmil P\Desktop\shortmaker\outputs\temp\bccdb4e8-2969-4c48-94c3-9c8d9173354d\HlBesuNG2pE.f140.m4a
-[download]   0.0% of    4.48MiB at  220.64KiB/s ETA 00:20[download]   0.1% of    4.48MiB at  661.91KiB/s ETA 00:06[download]   0.2% of    4.48MiB at    1.51MiB/s ETA 00:02[download]   0.3% of    4.48MiB at    2.65MiB/s ETA 00:01[download]   0.7% of    4.48MiB at    5.47MiB/s ETA 00:00[download]   1.4% of    4.48MiB at    5.84MiB/s ETA 00:00[download]   2.8% of    4.48MiB at    6.33MiB/s ETA 00:00[download]   5.6% of    4.48MiB at    7.42MiB/s ETA 00:00[download]  11.1% of    4.48MiB at    7.86MiB/s ETA 00:00[download]  22.3% of    4.48MiB at    5.73MiB/s ETA 00:00[download]  44.6% of    4.48MiB at    6.24MiB/s ETA 00:00[download]  89.2% of    4.48MiB at    6.56MiB/s ETA 00:00[download] 100.0% of    4.48MiB at    6.66MiB/s ETA 00:00[download] 100% of    4.48MiB in 00:00:00 at 5.31MiB/s   
-[Merger] Merging formats into "C:\Users\Ashmil P\Desktop\shortmaker\outputs\temp\bccdb4e8-2969-4c48-94c3-9c8d9173354d\HlBesuNG2pE.mp4"
-Deleting original file C:\Users\Ashmil P\Desktop\shortmaker\outputs\temp\bccdb4e8-2969-4c48-94c3-9c8d9173354d\HlBesuNG2pE.f140.m4a (pass -k to keep)
-Deleting original file C:\Users\Ashmil P\Desktop\shortmaker\outputs\temp\bccdb4e8-2969-4c48-94c3-9c8d9173354d\HlBesuNG2pE.f398.mp4 (pass -k to keep)
-INFO:     127.0.0.1:53992 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55492 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55493 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55496 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-
-Generating short 1/1
-  Time: 169.9s - 229.1s
-  Reason: question
-Running FFmpeg render: C:\ffmpeg\ffmpeg-8.0.1-essentials_build\bin\ffmpeg.EXE -y -ss 169.944 -i C:\Users\Ashmil P\Desktop\shortmaker\outputs\temp\bccdb4e8-2969-4c48-94c3-9c8d9173354d\HlBesuNG2pE.mp4 -t 59.152 -filter_complex [0:v]crop=405:720:437:0,scale=1080:1920:flags=lanczos,eq=saturation=1.10:contrast=1.06:brightness=0.01,unsharp=5:5:0.7:3:3:0.35,subtitles=filename='C\:/Users/Ashmil P/Desktop/shortmaker/outputs/shorts/bccdb4e8_short_1.ass':original_size=1080x1920:fontsdir='C\:/windows/Fonts',fps=30,setsar=1,format=yuv420p[v] -map [v] -map 0:a:0? -c:a aac -b:a 192k -af loudnorm=I=-14:TP=-1.5:LRA=11 -c:v libx264 -preset medium -crf 16 -threads 0 -profile:v high -level:v 4.2 -pix_fmt yuv420p -movflags +faststart C:\Users\Ashmil P\Desktop\shortmaker\outputs\shorts\bccdb4e8_short_1.mp4
-INFO:     127.0.0.1:55498 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55499 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55500 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55501 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52904 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52905 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52906 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65032 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65033 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65034 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65035 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65036 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65037 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:65038 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53782 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53596 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-  Saved: C:\Users\Ashmil P\Desktop\shortmaker\outputs\shorts\bccdb4e8_short_1.mp4 (78.9s)
-INFO:     127.0.0.1:52559 - "GET /ashmil2010/status/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52560 - "GET /ashmil2010/result/bccdb4e8-2969-4c48-94c3-9c8d9173354d HTTP/1.1" 200 OK

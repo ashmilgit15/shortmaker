@@ -1,5 +1,0 @@
-INFO:     127.0.0.1:56879 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60457 - "GET /ashmil2010/ai/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60458 - "POST /ashmil2010/youtube/auth/start HTTP/1.1" 500 Internal Server Error
-INFO:     127.0.0.1:49173 - "POST /ashmil2010/youtube/config HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49174 - "POST /ashmil2010/youtube/auth/start HTTP/1.1" 500 Internal Server Error
