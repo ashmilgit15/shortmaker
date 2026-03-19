@@ -7,6 +7,9 @@ google-api-python-client>=2.169.0
 google-auth>=2.40.0
 google-auth-oauthlib>=1.2.2
 google-auth-httplib2>=0.2.0
+httpx>=0.28.1
+PyJWT[crypto]>=2.10.1
+psycopg[binary]>=3.2.6
 
 # Optional local Whisper fallback (install when needed):
 # See requirements-local.txt

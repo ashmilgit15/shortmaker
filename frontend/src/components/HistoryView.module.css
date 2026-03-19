@@ -1,0 +1,27 @@
+.view { display: flex; flex-direction: column; gap: 2rem; }
+
+.empty { min-height: 60vh; }
+.emptyTitle { font-size: 1.125rem; font-weight: 700; color: var(--text-secondary); }
+
+.section { display: flex; flex-direction: column; gap: 1rem; }
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.125rem;
+}
+
+@media (max-width: 640px) {
+  .grid { grid-template-columns: 1fr; }
+}

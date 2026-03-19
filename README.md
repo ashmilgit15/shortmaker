@@ -53,6 +53,8 @@ cd shortmaker
 python -m venv venv
 .\venv\Scripts\Activate.ps1    # Windows PowerShell
 pip install -r requirements.txt
+cd frontend
+npm install
 ```
 > If you want face-tracking enabled, install OpenCV explicitly:
 >
@@ -64,6 +66,38 @@ pip install -r requirements.txt
 ```bash
 uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
+
+Copy `.env.example` to `.env` for local backend configuration. Secrets are read from environment variables first and persisted to `.env.json` only in encrypted form when `SHORTMAKER_SECRET_KEY` is set.
+
+### React + Clerk setup
+
+Clerk React quickstart: [https://clerk.com/docs/react/getting-started/quickstart](https://clerk.com/docs/react/getting-started/quickstart)
+
+In `frontend/.env.local`:
+
+```bash
+VITE_CLERK_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+# Optional: only set this when your API is on a different origin.
+# Leave it unset for the default Vite proxy -> http://127.0.0.1:8000
+# VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+The app uses Clerk in `frontend/src/main.jsx` with `<ClerkProvider>` at the root and `frontend/src/App.tsx` uses `<Show>`, `<SignInButton>`, `<SignUpButton>`, and `<UserButton>`.
+
+For split local frontend/backend development:
+
+```bash
+# Terminal 1 (backend)
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
+
+# Terminal 2 (frontend)
+cd frontend
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`.
+
+By default, Vite proxies frontend API requests such as `/capabilities`, `/session`, and `/jobs/recent` to `http://127.0.0.1:8000`. Only set `VITE_API_BASE_URL` when you need to bypass that proxy and call a different backend origin directly.
 
 If you are actively editing backend code, use `--reload` only for short test runs. A reload restarts the process and interrupts any in-flight transcription or video-generation job.
 
@@ -117,8 +151,16 @@ curl http://localhost:8000/health
 2. Render > New > Blueprint > connect repo
 3. Render will detect `render.yaml`
 4. Set environment variables in dashboard (recommended):
-   - `SHORTMAKER_ADMIN_TOKEN`
-   - `SHORTMAKER_AUTH_MODE=production`
+   - `DATABASE_URL`
+   - `VITE_CLERK_PUBLISHABLE_KEY`
+   - `CLERK_ISSUER`
+   - `SHORTMAKER_SECRET_KEY`
+   - `SHORTMAKER_ADMIN_EMAILS`
+   - `SHORTMAKER_ALLOWED_ORIGINS`
+   - `SHORTMAKER_ALLOWED_HOSTS`
+   - `YOUTUBE_CLIENT_ID`
+   - `YOUTUBE_CLIENT_SECRET`
+   - `YOUTUBE_REFRESH_TOKEN`
    - `GEMINI_API_KEY` (optional)
    - `GROQ_API_KEY` (optional)
 5. Deploy
@@ -170,13 +212,16 @@ shortmaker/
 │   ├── highlights.py     # AI + rule-based highlight detection
 │   └── shorts.py         # Processing orchestration
 ├── frontend/
-│   ├── index.html        # Single-page UI with AI settings
-│   ├── style.css         # Premium dark theme
-│   └── script.js         # API integration with AI config
+│   ├── index.html        # Vite entry HTML
+│   ├── package.json      # React + Clerk frontend package manifest
+│   ├── src/App.tsx       # Main application shell
+│   ├── src/main.jsx      # React bootstrap + ClerkProvider
+│   └── src/index.css     # Frontend styles
 ├── utils/
 │   └── ffmpeg_helpers.py # Video processing utilities
 ├── outputs/              # Generated shorts (auto-created)
-├── .env.json             # AI configuration (auto-created)
+├── .env.example         # Local backend environment template
+├── .env.json            # Encrypted runtime config (auto-created)
 ├── requirements.txt      # Python dependencies
 └── README.md             # This file
 ```

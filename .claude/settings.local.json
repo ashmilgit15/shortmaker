@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"C:\\\\Users\\\\Ashmil P\\\\desktop\\\\shortmaker\\\\frontend\" && npm run build 2>&1)"
+    ]
+  }
+}

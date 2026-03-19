@@ -22,6 +22,7 @@ load_dotenv_file(BASE_DIR / ".env")
 FIRECRAWL_BASE_URL = os.environ.get("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev").rstrip("/")
 FIRECRAWL_SEARCH_ENDPOINT = f"{FIRECRAWL_BASE_URL}/v2/search"
 TREND_QUERY_LIMIT = 4
+FIRECRAWL_SEARCH_TIMEOUT_MS = 20_000
 TREND_QUERY_TEMPLATES = (
     'site:youtube.com/watch "{topic}" trending',
     'site:youtube.com/watch "{topic}" latest',
@@ -157,13 +158,12 @@ def _firecrawl_search(query: str, location: str, limit: int, api_key: str) -> Li
     payload = {
         "query": query,
         "limit": max(1, min(limit, 10)),
+        "sources": ["web"],
         "location": location,
         "country": COUNTRY_BY_LOCATION.get(location_key, "IN"),
         "tbs": "qdr:w",
+        "timeout": FIRECRAWL_SEARCH_TIMEOUT_MS,
         "ignoreInvalidURLs": True,
-        "scrapeOptions": {
-            "formats": ["markdown"],
-        },
     }
 
     try:
@@ -192,10 +192,19 @@ def discover_trend_videos(topic: str, location: str = "India", limit: int = 6) -
         raise RuntimeError("Firecrawl API key is not configured")
 
     candidates_by_url: Dict[str, dict] = {}
+    query_errors: List[str] = []
+    target_count = max(1, min(limit, 12))
 
     for template in TREND_QUERY_TEMPLATES:
         query = template.format(topic=topic)
-        for item in _firecrawl_search(query, location, TREND_QUERY_LIMIT, api_key):
+        try:
+            query_results = _firecrawl_search(query, location, TREND_QUERY_LIMIT, api_key)
+        except RuntimeError as exc:
+            logger.warning("Trend discovery query failed for '%s': %s", query, exc)
+            query_errors.append(str(exc))
+            continue
+
+        for item in query_results:
             normalized_url = _normalize_youtube_url(str(item.get("url", "")))
             if not normalized_url:
                 continue
@@ -214,8 +223,17 @@ def discover_trend_videos(topic: str, location: str = "India", limit: int = 6) -
             if existing is None or candidate["score"] > existing["score"]:
                 candidates_by_url[normalized_url] = candidate
 
+        if len(candidates_by_url) >= target_count:
+            break
+
     ranked = sorted(candidates_by_url.values(), key=lambda item: item["score"], reverse=True)
-    return ranked[: max(1, min(limit, 12))]
+    if ranked:
+        return ranked[:target_count]
+
+    if query_errors:
+        raise RuntimeError(query_errors[0])
+
+    return []
 
 
 def auto_pick_trend_video(topic: str, location: str = "India", limit: int = 6) -> dict:

@@ -16,17 +16,34 @@ import json
 import traceback
 import secrets
 import hashlib
+import ipaddress
+import socket
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, File, Form, Header, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import threading
 import logging
 from urllib.parse import urlparse
 from utils.env_loader import load_dotenv_file
+from utils.secret_store import SHORTMAKER_SECRET_KEY_ENV, has_secret_storage_key
+from .clerk_auth import ClerkUser, require_clerk_user
+from .db import (
+    create_job_record,
+    database_enabled,
+    get_daily_usage,
+    get_job_ids_for_user,
+    get_job_owner,
+    init_database,
+    result_file_belongs_to_user,
+    sync_job_status,
+    upsert_user,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +58,7 @@ BASE_DIR = Path(__file__).parent.parent
 load_dotenv_file(BASE_DIR / ".env")
 OUTPUT_DIR = BASE_DIR / "outputs"
 FRONTEND_DIR = BASE_DIR / "frontend"
+WEB_DIST_DIR = FRONTEND_DIR / "dist"
 SHORTS_DIR = OUTPUT_DIR / "shorts"
 JOBS_DIR = OUTPUT_DIR / "jobs"
 UPLOAD_DIR = OUTPUT_DIR / "uploads"
@@ -53,10 +71,17 @@ DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS = 30
 DEFAULT_API_KEY_LENGTH = 44
 DEFAULT_YOUTUBE_OAUTH_CALLBACK_URI = "http://127.0.0.1:8000/youtube/oauth/callback"
 DEFAULT_YOUTUBE_OAUTH_CALLBACK_PATH = "/youtube/oauth/callback"
+DAILY_PROCESS_LIMIT = 3
 ADMIN_API_TOKEN_ENV = "SHORTMAKER_ADMIN_TOKEN"
 AUTH_MODE_ENV = "SHORTMAKER_AUTH_MODE"
 YOUTUBE_OAUTH_BASE_URL_ENV = "SHORTMAKER_YOUTUBE_OAUTH_BASE_URL"
 YOUTUBE_OAUTH_CALLBACK_URI_ENV = "SHORTMAKER_YOUTUBE_OAUTH_CALLBACK_URI"
+APP_ENV_ENV = "SHORTMAKER_ENV"
+PUBLIC_DOCS_ENV = "SHORTMAKER_PUBLIC_DOCS"
+ALLOWED_ORIGINS_ENV = "SHORTMAKER_ALLOWED_ORIGINS"
+ALLOWED_HOSTS_ENV = "SHORTMAKER_ALLOWED_HOSTS"
+ALLOWED_CALLBACK_HOSTS_ENV = "SHORTMAKER_ALLOWED_CALLBACK_HOSTS"
+ALLOW_PRIVATE_CALLBACKS_ENV = "SHORTMAKER_ALLOW_PRIVATE_CALLBACKS"
 AUTH_MODE_KEY = "auth_mode"
 AUTH_MODE_QUICK = "quick"
 AUTH_MODE_PRODUCTION = "production"
@@ -74,19 +99,46 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # FastAPI App
 # ========================================
 
+def _env_csv(name: str, default: str = "") -> list[str]:
+    raw = os.environ.get(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+IS_PRODUCTION = os.environ.get(APP_ENV_ENV, "").strip().lower() == "production"
+PUBLIC_DOCS_ENABLED = os.environ.get(PUBLIC_DOCS_ENV, "").strip().lower() in {"1", "true", "yes"}
+DEFAULT_ALLOWED_ORIGINS = "http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:5173,http://localhost:5173"
+DEFAULT_ALLOWED_HOSTS = "127.0.0.1,localhost"
+ALLOWED_ORIGINS = _env_csv(ALLOWED_ORIGINS_ENV, DEFAULT_ALLOWED_ORIGINS)
+ALLOWED_HOSTS = _env_csv(ALLOWED_HOSTS_ENV, DEFAULT_ALLOWED_HOSTS)
+
 app = FastAPI(
     title="ShortMaker",
-    description="Convert YouTube videos into short vertical clips with AI",
-    version="2.0.0"
+    description="Convert long-form videos into short vertical clips with AI",
+    version="3.0.0",
+    docs_url=None if IS_PRODUCTION and not PUBLIC_DOCS_ENABLED else "/docs",
+    redoc_url=None if IS_PRODUCTION and not PUBLIC_DOCS_ENABLED else "/redoc",
+    openapi_url=None if IS_PRODUCTION and not PUBLIC_DOCS_ENABLED else "/openapi.json",
 )
 
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "X-Admin-Token", "X-API-Key"],
+)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=ALLOWED_HOSTS or ["127.0.0.1", "localhost"],
 )
 
 
@@ -116,6 +168,23 @@ class StatusResponse(BaseModel):
     error: Optional[str] = None
     results: list = []
     ai_highlights: list = []
+
+
+class UsageResponse(BaseModel):
+    limit: int
+    used: int
+    remaining: int
+    reset_basis: str = "utc_day"
+
+
+class SessionResponse(BaseModel):
+    user_id: str
+    email: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    image_url: str = ""
+    is_admin: bool = False
+    usage: UsageResponse
 
 
 class AIConfigRequest(BaseModel):
@@ -289,16 +358,195 @@ async def _require_admin_token(x_admin_token: Optional[str] = Header(default=Non
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
 
+async def _require_app_user(user: ClerkUser = Depends(require_clerk_user)) -> ClerkUser:
+    return _register_user(user)
+
+
+def _register_user(user: ClerkUser) -> ClerkUser:
+    upsert_user(
+        {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "image_url": user.image_url,
+        }
+    )
+    return user
+
+
+def _split_csv_env(name: str) -> set[str]:
+    return {
+        item.strip()
+        for item in os.environ.get(name, "").split(",")
+        if item.strip()
+    }
+
+
+def _is_admin_user(user: ClerkUser) -> bool:
+    allowed_ids = _split_csv_env("SHORTMAKER_ADMIN_USER_IDS")
+    allowed_emails = {item.lower() for item in _split_csv_env("SHORTMAKER_ADMIN_EMAILS")}
+    if not allowed_ids and not allowed_emails:
+        return False
+    if user.id in allowed_ids:
+        return True
+    if user.email and user.email.lower() in allowed_emails:
+        return True
+    return False
+
+
+async def _require_admin_user(user: ClerkUser = Depends(_require_app_user)) -> ClerkUser:
+    if _is_admin_user(user):
+        return user
+    raise HTTPException(status_code=403, detail="You do not have access to the admin console.")
+
+
+def _admin_console_user() -> ClerkUser:
+    return ClerkUser(
+        id="admin-console",
+        email="admin@shortmaker.local",
+        first_name="Admin",
+        last_name="Console",
+        image_url="",
+        claims={"role": "admin-console"},
+    )
+
+
+def _automation_api_user() -> ClerkUser:
+    return ClerkUser(
+        id="api-automation",
+        email="automation@shortmaker.local",
+        first_name="API",
+        last_name="Automation",
+        image_url="",
+        claims={"role": "api-automation"},
+    )
+
+
+def _is_admin_console_user(user: Optional[ClerkUser]) -> bool:
+    return bool(user and user.id == "admin-console")
+
+
+def _is_automation_api_user(user: Optional[ClerkUser]) -> bool:
+    return bool(user and user.id == "api-automation")
+
+
+async def _require_app_user_or_api_key(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+) -> ClerkUser:
+    raw_authorization = (authorization or "").strip()
+
+    if x_api_key:
+        await _require_api_key(x_api_key=x_api_key, authorization=authorization)
+        return _register_user(_automation_api_user())
+
+    if raw_authorization:
+        token = raw_authorization[7:].strip() if raw_authorization.lower().startswith("bearer ") else raw_authorization
+        if token.count(".") == 2:
+            return _register_user(await require_clerk_user(authorization))
+        await _require_api_key(x_api_key=x_api_key, authorization=authorization)
+        return _register_user(_automation_api_user())
+
+    if _is_api_auth_required():
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication. Provide a Clerk bearer token or X-API-Key.",
+        )
+
+    return _register_user(_automation_api_user())
+
+
+def _owner_id_from_status(status: dict) -> str:
+    return str(status.get("owner_id") or "").strip()
+
+
+def _assert_job_ownership(job_id: str, status: dict, user: ClerkUser):
+    owner_id = _owner_id_from_status(status)
+    if owner_id and owner_id == user.id:
+        return
+
+    if database_enabled():
+        persisted_owner = get_job_owner(job_id)
+        if persisted_owner and persisted_owner == user.id:
+            return
+
+    raise HTTPException(status_code=404, detail="Job not found.")
+
+
+def _assert_daily_quota(user: ClerkUser):
+    usage = get_daily_usage(user.id, limit=DAILY_PROCESS_LIMIT)
+    if usage["remaining"] <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Daily processing limit reached. Each account can process up to "
+                f"{DAILY_PROCESS_LIMIT} URLs or uploads per UTC day."
+            ),
+        )
+
+
 def _mask_api_key(api_key: str) -> str:
     if len(api_key) <= 12:
         return "***"
     return f"{api_key[:8]}...{api_key[-4:]}"
 
 
+def _assert_secret_storage_ready(*values: str):
+    if any(str(value or "").strip() for value in values) and not has_secret_storage_key():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Secret persistence is disabled. Set {SHORTMAKER_SECRET_KEY_ENV} "
+                "or configure the secret directly via environment variables."
+            ),
+        )
+
+
 def _normalize_callback_timeout(timeout_seconds: int) -> int:
     if timeout_seconds <= 0:
         return 5
     return min(120, timeout_seconds)
+
+
+def _is_public_ip(value: str) -> bool:
+    try:
+        ip_obj = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return not (
+        ip_obj.is_private
+        or ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_reserved
+        or ip_obj.is_multicast
+        or ip_obj.is_unspecified
+    )
+
+
+def _callback_host_allowed(hostname: str) -> bool:
+    allowed_hosts = {item.lower() for item in _split_csv_env(ALLOWED_CALLBACK_HOSTS_ENV)}
+    if not allowed_hosts:
+        return False
+    normalized = (hostname or "").strip().lower()
+    if not normalized:
+        return False
+    for allowed_host in allowed_hosts:
+        if normalized == allowed_host:
+            return True
+        if allowed_host.startswith("*."):
+            suffix = allowed_host[2:]
+            if suffix and (normalized == suffix or normalized.endswith(f".{suffix}")):
+                return True
+        if allowed_host.startswith("."):
+            suffix = allowed_host[1:]
+            if suffix and (normalized == suffix or normalized.endswith(f".{suffix}")):
+                return True
+    return False
+
+
+def _allow_private_callbacks() -> bool:
+    return not IS_PRODUCTION and _env_flag(ALLOW_PRIVATE_CALLBACKS_ENV)
 
 
 def _safe_filename(filename: str) -> str:
@@ -317,6 +565,25 @@ def _validate_callback_url(url: str):
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise HTTPException(status_code=400, detail="callback_url must be http or https")
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="callback_url must include a hostname")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="callback_url must not contain embedded credentials")
+    if not _callback_host_allowed(parsed.hostname):
+        raise HTTPException(status_code=400, detail="callback_url host is not allowlisted")
+    if _is_public_ip(parsed.hostname):
+        return
+    try:
+        resolved_hosts = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=400, detail=f"callback_url host could not be resolved: {exc}") from exc
+    resolved_ips = {entry[4][0] for entry in resolved_hosts if entry and entry[4]}
+    if not resolved_ips:
+        raise HTTPException(status_code=400, detail="callback_url host could not be resolved")
+    if _allow_private_callbacks():
+        return
+    if not all(_is_public_ip(ip) for ip in resolved_ips):
+        raise HTTPException(status_code=400, detail="callback_url must resolve only to public IP addresses")
 
 
 def _build_result_payload(job_id: str, status: dict, public_base_url: Optional[str] = None):
@@ -538,30 +805,46 @@ def update_job_status(job_id: str, stage: str, progress: int, message: str,
             if value is not None:
                 status_data[key] = value
     save_job_status(job_id, status_data)
+    sync_job_status(job_id, status_data)
     logger.info(f"[{job_id[:8]}] [{stage}] {progress}% - {message}")
 
 
 @app.on_event("startup")
 async def _recover_interrupted_jobs_on_startup():
+    if not os.environ.get("CLERK_ISSUER", "").strip():
+        logger.warning("CLERK_ISSUER is not configured. Authenticated routes will reject requests.")
+    if not _split_csv_env("SHORTMAKER_ADMIN_USER_IDS") and not _split_csv_env("SHORTMAKER_ADMIN_EMAILS"):
+        logger.warning("No admin allowlist configured. Admin routes are disabled until SHORTMAKER_ADMIN_USER_IDS or SHORTMAKER_ADMIN_EMAILS is set.")
+    init_database()
     recover_incomplete_jobs()
 
 
-def list_recent_jobs(limit: int = RECENT_JOB_LIMIT, public_base_url: Optional[str] = None) -> list[dict]:
+def list_recent_jobs(
+    limit: int = RECENT_JOB_LIMIT,
+    public_base_url: Optional[str] = None,
+    owner_id: Optional[str] = None,
+) -> list[dict]:
     """Return the most recent persisted jobs."""
     jobs: list[dict] = []
-    if not JOBS_DIR.exists():
-        return jobs
+    job_ids: list[str] = []
 
-    files = sorted(
-        JOBS_DIR.glob("*.json"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    for path in files[: max(1, limit)]:
-        status = load_job_status(path.stem)
+    if owner_id and database_enabled():
+        job_ids = get_job_ids_for_user(owner_id, limit=max(1, limit))
+    elif JOBS_DIR.exists():
+        files = sorted(
+            JOBS_DIR.glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        job_ids = [path.stem for path in files[: max(1, limit)]]
+
+    for job_id in job_ids:
+        status = load_job_status(job_id)
         if not status:
             continue
-        jobs.append(_build_result_payload(path.stem, status, public_base_url=public_base_url))
+        if owner_id and _owner_id_from_status(status) and _owner_id_from_status(status) != owner_id:
+            continue
+        jobs.append(_build_result_payload(job_id, status, public_base_url=public_base_url))
     return jobs
 
 
@@ -644,11 +927,13 @@ def _build_youtube_redirect_uri(request: Request) -> str:
     return f"{redirect_origin}{DEFAULT_YOUTUBE_OAUTH_CALLBACK_PATH}"
 
 
-def _queue_youtube_job(request: ProcessRequest) -> ProcessResponse:
+def _queue_youtube_job(request: ProcessRequest, user: ClerkUser) -> ProcessResponse:
     if not request.url:
         raise HTTPException(status_code=400, detail="URL is required")
     if not _is_supported_youtube_url(request.url):
         raise HTTPException(status_code=400, detail="Invalid YouTube URL")
+
+    user = _register_user(user)
 
     num_clips = validate_num_clips(request.num_clips)
     callback_config = _build_callback_config(
@@ -665,10 +950,22 @@ def _queue_youtube_job(request: ProcessRequest) -> ProcessResponse:
         0,
         "Job queued for processing",
         metadata={
+            "owner_id": user.id,
+            "owner_email": user.email,
             "source_type": "youtube",
             "input_name": request.url,
             "num_clips": num_clips,
         },
+    )
+    create_job_record(
+        job_id=job_id,
+        clerk_user_id=user.id,
+        source_type="youtube",
+        input_name=request.url,
+        num_clips=num_clips,
+        stage="queued",
+        progress=0,
+        message="Job queued for processing",
     )
 
     thread = threading.Thread(
@@ -693,8 +990,10 @@ async def _queue_upload_job(
     callback_auth_header: str,
     public_base_url: Optional[str],
     callback_timeout_seconds: int,
+    user: ClerkUser,
 ) -> ProcessResponse:
     num_clips = validate_num_clips(num_clips)
+    user = _register_user(user)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required")
@@ -736,10 +1035,22 @@ async def _queue_upload_job(
         0,
         "Job queued for processing uploaded video",
         metadata={
+            "owner_id": user.id,
+            "owner_email": user.email,
             "source_type": "upload",
             "input_name": file.filename,
             "num_clips": num_clips,
         },
+    )
+    create_job_record(
+        job_id=job_id,
+        clerk_user_id=user.id,
+        source_type="upload",
+        input_name=file.filename,
+        num_clips=num_clips,
+        stage="queued",
+        progress=0,
+        message="Job queued for processing uploaded video",
     )
 
     thread = threading.Thread(
@@ -758,17 +1069,21 @@ async def _queue_upload_job(
     return ProcessResponse(job_id=job_id, message="Upload processing started")
 
 
-def _get_job_payload(job_id: str, public_base_url: Optional[str] = None) -> dict:
+def _get_job_payload(job_id: str, public_base_url: Optional[str] = None, user: Optional[ClerkUser] = None) -> dict:
     status = load_job_status(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    if user:
+        _assert_job_ownership(job_id, status, user)
     return _build_result_payload(job_id, status, public_base_url=public_base_url)
 
 
-def _get_completed_result_payload(job_id: str, public_base_url: str) -> dict:
+def _get_completed_result_payload(job_id: str, public_base_url: str, user: Optional[ClerkUser] = None) -> dict:
     status = load_job_status(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    if user:
+        _assert_job_ownership(job_id, status, user)
     if status.get("stage") != "complete":
         raise HTTPException(status_code=400, detail=f"Job not complete. Current stage: {status.get('stage')}")
 
@@ -793,11 +1108,13 @@ def _build_capabilities_payload(*, require_api_key: bool, admin_console: bool = 
 
     return {
         "max_clips": MAX_CLIPS,
+        "daily_process_limit": DAILY_PROCESS_LIMIT,
         "supports_uploads": True,
         "supports_trend_discovery": bool(has_firecrawl_config()),
         "supports_youtube_publish": True,
         "allowed_video_extensions": sorted(ALLOWED_VIDEO_EXTENSIONS),
         "requires_api_key": require_api_key,
+        "requires_authentication": not admin_console,
         "auth_mode": "admin" if admin_console else _get_auth_mode(),
         "api_key_count": len(_list_api_keys()),
         "admin_token_configured": bool(_get_admin_token()),
@@ -1134,9 +1451,31 @@ def run_processing_job(
 # API Endpoints
 # ========================================
 
+@app.get("/session", response_model=SessionResponse)
+async def get_session(user: ClerkUser = Depends(_require_app_user)):
+    usage = get_daily_usage(user.id, limit=DAILY_PROCESS_LIMIT)
+    return SessionResponse(
+        user_id=user.id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        image_url=user.image_url,
+        is_admin=_is_admin_user(user),
+        usage=UsageResponse(**usage),
+    )
+
+
+@app.get("/usage", response_model=UsageResponse)
+async def get_usage(user: ClerkUser = Depends(_require_app_user)):
+    usage = get_daily_usage(user.id, limit=DAILY_PROCESS_LIMIT)
+    return UsageResponse(**usage)
+
+
 @app.post("/process", response_model=ProcessResponse)
-async def start_processing(request: ProcessRequest, _auth: None = Depends(_require_api_key)):
-    return _queue_youtube_job(request)
+async def start_processing(request: ProcessRequest, user: ClerkUser = Depends(_require_app_user_or_api_key)):
+    if not _is_automation_api_user(user):
+        _assert_daily_quota(user)
+    return _queue_youtube_job(request, user)
 
 
 @app.post("/process/upload", response_model=ProcessResponse)
@@ -1148,8 +1487,10 @@ async def start_processing_upload(
     callback_auth_header: str = Form(default="X-Callback-Token"),
     public_base_url: Optional[str] = Form(default=None),
     callback_timeout_seconds: int = Form(default=DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS),
-    _auth: None = Depends(_require_api_key),
+    user: ClerkUser = Depends(_require_app_user_or_api_key),
 ):
+    if not _is_automation_api_user(user):
+        _assert_daily_quota(user)
     return await _queue_upload_job(
         file=file,
         num_clips=num_clips,
@@ -1158,18 +1499,19 @@ async def start_processing_upload(
         callback_auth_header=callback_auth_header,
         public_base_url=public_base_url,
         callback_timeout_seconds=callback_timeout_seconds,
+        user=user,
     )
 
 
 @app.get("/status/{job_id}")
-async def get_status(job_id: str, request: Request, _auth: None = Depends(_require_api_key)):
-    return _get_job_payload(job_id, public_base_url=_resolve_public_base_url(request))
+async def get_status(job_id: str, request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)):
+    return _get_job_payload(job_id, public_base_url=_resolve_public_base_url(request), user=user)
 
 
 @app.get("/jobs/recent")
-async def get_recent_jobs(request: Request, _auth: None = Depends(_require_api_key)):
+async def get_recent_jobs(request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)):
     base_url = _resolve_public_base_url(request)
-    jobs = list_recent_jobs(public_base_url=base_url)
+    jobs = list_recent_jobs(public_base_url=base_url, owner_id=user.id)
     return {
         "jobs": jobs,
         "count": len(jobs),
@@ -1177,17 +1519,19 @@ async def get_recent_jobs(request: Request, _auth: None = Depends(_require_api_k
 
 
 @app.get("/result/{job_id}")
-async def get_result(job_id: str, request: Request, _auth: None = Depends(_require_api_key)):
-    return _get_completed_result_payload(job_id, _resolve_public_base_url(request))
+async def get_result(job_id: str, request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)):
+    return _get_completed_result_payload(job_id, _resolve_public_base_url(request), user=user)
 
 
 @app.get("/shorts/{filename}")
-async def download_short(filename: str, _auth: None = Depends(_require_api_key)):
+async def download_short(filename: str, user: ClerkUser = Depends(_require_app_user_or_api_key)):
     """Download a generated short clip."""
     safe_name = Path(filename).name
     file_path = SHORTS_DIR / safe_name
     
     if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if database_enabled() and not result_file_belongs_to_user(user.id, safe_name):
         raise HTTPException(status_code=404, detail="File not found")
     
     return FileResponse(
@@ -1198,22 +1542,26 @@ async def download_short(filename: str, _auth: None = Depends(_require_api_key))
 
 
 @app.get("/shorts")
-async def list_shorts(_auth: None = Depends(_require_api_key)):
+async def list_shorts(user: ClerkUser = Depends(_require_app_user_or_api_key)):
     """List all generated shorts."""
-    if not SHORTS_DIR.exists():
-        return {"shorts": []}
-    
-    files = [f.name for f in SHORTS_DIR.iterdir() if f.suffix == ".mp4"]
-    return {"shorts": files}
+    jobs = list_recent_jobs(limit=RECENT_JOB_LIMIT, owner_id=user.id)
+    short_names: list[str] = []
+    for job in jobs:
+        for filename in job.get("results", []) or []:
+            if filename not in short_names:
+                short_names.append(filename)
+    return {"shorts": short_names}
 
 
 @app.delete("/shorts/{filename}")
-async def delete_short(filename: str, _auth: None = Depends(_require_api_key)):
+async def delete_short(filename: str, user: ClerkUser = Depends(_require_app_user_or_api_key)):
     """Delete a generated short clip."""
     safe_name = _safe_filename(filename)
     file_path = SHORTS_DIR / safe_name
     
     if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if database_enabled() and not result_file_belongs_to_user(user.id, safe_name):
         raise HTTPException(status_code=404, detail="File not found")
     
     os.remove(file_path)
@@ -1221,14 +1569,21 @@ async def delete_short(filename: str, _auth: None = Depends(_require_api_key)):
 
 
 @app.delete("/shorts")
-async def clear_shorts(_auth: None = Depends(_require_api_key)):
+async def clear_shorts(user: ClerkUser = Depends(_require_app_user_or_api_key)):
     """Delete all generated shorts."""
     if SHORTS_DIR.exists():
-        for f in SHORTS_DIR.iterdir():
-            if f.suffix == ".mp4":
-                os.remove(f)
+        jobs = list_recent_jobs(limit=RECENT_JOB_LIMIT * 4, owner_id=user.id)
+        owned_files = {
+            filename
+            for job in jobs
+            for filename in (job.get("results", []) or [])
+        }
+        for filename in owned_files:
+            file_path = SHORTS_DIR / filename
+            if file_path.exists() and file_path.suffix == ".mp4":
+                os.remove(file_path)
 
-    return {"message": "All shorts deleted"}
+    return {"message": "Deleted your generated shorts"}
 
 
 # ========================================
@@ -1325,8 +1680,7 @@ async def set_auth_mode(payload: AuthModeRequest, admin: None = Depends(_require
 # AI Configuration Endpoints
 # ========================================
 
-@app.get("/ai/config")
-async def get_ai_config():
+def _build_ai_config_response() -> dict:
     """Get current AI configuration status."""
     from .ai_engine import load_config, is_ai_enabled, get_api_key
     from .youtube_publish import get_youtube_status
@@ -1346,12 +1700,15 @@ async def get_ai_config():
         "youtube_authorized_at": youtube_status.get("authorized_at"),
         "model": config.get("model", "gemini-2.5-flash"),
         "is_active": is_ai_enabled(),
-        "message": "AI is active and ready!" if is_ai_enabled() else "Configure your API keys to enable AI features."
+        "message": (
+            "AI is active and ready!"
+            if is_ai_enabled()
+            else "Configure your API keys through environment variables or the encrypted admin store."
+        ),
     }
 
 
-@app.post("/ai/config")
-async def set_ai_config(request: AIConfigRequest):
+def _apply_ai_config(request: AIConfigRequest) -> dict:
     """Configure AI settings."""
     from .ai_engine import save_config, check_api_key_format, load_config
     from .youtube_publish import VALID_PRIVACY_STATUSES
@@ -1361,6 +1718,13 @@ async def set_ai_config(request: AIConfigRequest):
         is_valid, message = check_api_key_format(request.gemini_api_key)
         if not is_valid:
             raise HTTPException(status_code=400, detail=message)
+    _assert_secret_storage_ready(
+        request.gemini_api_key,
+        request.groq_api_key,
+        request.firecrawl_api_key,
+        request.youtube_client_id,
+        request.youtube_client_secret,
+    )
     normalized_privacy = request.youtube_default_privacy.strip().lower() or "private"
     if normalized_privacy not in VALID_PRIVACY_STATUSES:
         raise HTTPException(status_code=400, detail="YouTube privacy must be private, unlisted, or public.")
@@ -1417,8 +1781,7 @@ async def set_ai_config(request: AIConfigRequest):
     }
 
 
-@app.post("/ai/validate")
-async def validate_key(request: AIValidateRequest):
+def _validate_ai_key(request: AIValidateRequest) -> dict:
     """Validate a Gemini API key without saving it."""
     from .ai_engine import validate_api_key
     
@@ -1430,31 +1793,47 @@ async def validate_key(request: AIValidateRequest):
     }
 
 
+@app.get("/ai/config")
+async def get_ai_config(admin: ClerkUser = Depends(_require_admin_user)):
+    return _build_ai_config_response()
+
+
+@app.post("/ai/config")
+async def set_ai_config(request: AIConfigRequest, admin: ClerkUser = Depends(_require_admin_user)):
+    return _apply_ai_config(request)
+
+
+@app.post("/ai/validate")
+async def validate_key(request: AIValidateRequest, admin: ClerkUser = Depends(_require_admin_user)):
+    return _validate_ai_key(request)
+
+
 @app.get(f"{ADMIN_ROUTE_PREFIX}/ai/config")
 async def admin_get_ai_config():
-    """Admin config includes saved YouTube OAuth fields for prefilled inputs."""
-    from .ai_engine import load_config
+    """Admin config intentionally omits write-only secret values."""
 
-    payload = await get_ai_config()
-    config = load_config()
-    payload["youtube_client_id"] = config.get("youtube_client_id", "")
-    payload["youtube_client_secret"] = config.get("youtube_client_secret", "")
+    payload = _build_ai_config_response()
+    payload["gemini_api_key"] = ""
+    payload["groq_api_key"] = ""
+    payload["firecrawl_api_key"] = ""
+    payload["youtube_client_id"] = ""
+    payload["youtube_client_secret"] = ""
     return payload
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/ai/config")
 async def admin_set_ai_config(request: AIConfigRequest):
     """Accept admin-prefixed AI config requests for frontend compatibility."""
-    return await set_ai_config(request)
+    return _apply_ai_config(request)
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/ai/validate")
 async def admin_validate_key(request: AIValidateRequest):
-    return await validate_key(request)
+    return _validate_ai_key(request)
 
 
 @app.post("/trends/discover")
-async def discover_trends(request: TrendDiscoverRequest, _auth: None = Depends(_require_api_key)):
+async def discover_trends(request: TrendDiscoverRequest, user: ClerkUser = Depends(_require_app_user)):
     from .trends import discover_trend_videos
 
     try:
@@ -1477,8 +1856,9 @@ async def discover_trends(request: TrendDiscoverRequest, _auth: None = Depends(_
 
 
 @app.post("/trends/auto-process")
-async def auto_process_trend(request: TrendAutoProcessRequest, _auth: None = Depends(_require_api_key)):
+async def auto_process_trend(request: TrendAutoProcessRequest, user: ClerkUser = Depends(_require_app_user)):
     from .trends import auto_pick_trend_video
+    _assert_daily_quota(user)
 
     try:
         candidate = auto_pick_trend_video(
@@ -1495,7 +1875,8 @@ async def auto_process_trend(request: TrendAutoProcessRequest, _auth: None = Dep
         ProcessRequest(
             url=candidate["url"],
             num_clips=validate_num_clips(request.num_clips),
-        )
+        ),
+        user,
     )
 
     return {
@@ -1506,7 +1887,7 @@ async def auto_process_trend(request: TrendAutoProcessRequest, _auth: None = Dep
 
 
 @app.get("/youtube/status")
-async def get_youtube_publish_status(request: Request):
+async def get_youtube_publish_status(request: Request, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import get_youtube_status
 
     status = get_youtube_status()
@@ -1515,9 +1896,10 @@ async def get_youtube_publish_status(request: Request):
 
 
 @app.post("/youtube/config")
-async def set_youtube_publish_config(request: YouTubeConfigRequest):
+async def set_youtube_publish_config(request: YouTubeConfigRequest, admin: ClerkUser = Depends(_require_admin_user)):
     from .youtube_publish import save_youtube_settings
 
+    _assert_secret_storage_ready(request.youtube_client_id, request.youtube_client_secret)
     status = save_youtube_settings(
         client_id=request.youtube_client_id,
         client_secret=request.youtube_client_secret,
@@ -1531,7 +1913,7 @@ async def set_youtube_publish_config(request: YouTubeConfigRequest):
 
 
 @app.post("/youtube/auth/start")
-async def start_youtube_auth(request: Request, _auth: None = Depends(_require_api_key)):
+async def start_youtube_auth(request: Request, user: ClerkUser = Depends(_require_admin_user)):
     from .youtube_publish import build_authorization_url
 
     redirect_uri = _build_youtube_redirect_uri(request)
@@ -1587,7 +1969,7 @@ async def youtube_oauth_callback(
 
 
 @app.delete("/youtube/connection")
-async def disconnect_youtube(_auth: None = Depends(_require_api_key)):
+async def disconnect_youtube(user: ClerkUser = Depends(_require_admin_user)):
     from .youtube_publish import clear_youtube_connection
 
     clear_youtube_connection()
@@ -1597,12 +1979,18 @@ async def disconnect_youtube(_auth: None = Depends(_require_api_key)):
 @app.post("/youtube/upload")
 async def upload_short_to_youtube(
     payload: YouTubeUploadRequest,
-    _auth: None = Depends(_require_api_key),
+    user: ClerkUser = Depends(_require_app_user),
 ):
     from .youtube_publish import upload_short
 
     file_path = SHORTS_DIR / _safe_filename(payload.filename)
     if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Short file not found.")
+    if (
+        database_enabled()
+        and not _is_admin_console_user(user)
+        and not result_file_belongs_to_user(user.id, _safe_filename(payload.filename))
+    ):
         raise HTTPException(status_code=404, detail="Short file not found.")
 
     try:
@@ -1624,7 +2012,7 @@ async def upload_short_to_youtube(
 @app.post("/youtube/upload/batch")
 async def upload_shorts_to_youtube(
     payload: YouTubeUploadBatchRequest,
-    _auth: None = Depends(_require_api_key),
+    user: ClerkUser = Depends(_require_app_user),
 ):
     from .youtube_publish import upload_short
 
@@ -1636,8 +2024,21 @@ async def upload_shorts_to_youtube(
     failed_count = 0
 
     for item in payload.uploads:
-        file_path = SHORTS_DIR / _safe_filename(item.filename)
+        safe_name = _safe_filename(item.filename)
+        file_path = SHORTS_DIR / safe_name
         if not file_path.exists():
+            uploads.append({
+                "success": False,
+                "filename": item.filename,
+                "error": "Short file not found.",
+            })
+            failed_count += 1
+            continue
+        if (
+            database_enabled()
+            and not _is_admin_console_user(user)
+            and not result_file_belongs_to_user(user.id, safe_name)
+        ):
             uploads.append({
                 "success": False,
                 "filename": item.filename,
@@ -1696,7 +2097,7 @@ async def get_capabilities():
 @app.post(f"{ADMIN_ROUTE_PREFIX}/process", response_model=ProcessResponse)
 async def admin_start_processing(request: ProcessRequest):
     """Start a YouTube processing job from the admin console without API-key auth."""
-    return _queue_youtube_job(request)
+    return _queue_youtube_job(request, _admin_console_user())
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/process/upload", response_model=ProcessResponse)
@@ -1717,6 +2118,7 @@ async def admin_start_processing_upload(
         callback_auth_header=callback_auth_header,
         public_base_url=public_base_url,
         callback_timeout_seconds=callback_timeout_seconds,
+        user=_admin_console_user(),
     )
 
 
@@ -1742,42 +2144,68 @@ async def admin_get_result(job_id: str, request: Request):
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/trends/discover")
 async def admin_discover_trends(request: TrendDiscoverRequest):
-    return await discover_trends(request)
+    return await discover_trends(request, _admin_console_user())
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/trends/auto-process")
 async def admin_auto_process_trend(request: TrendAutoProcessRequest):
-    return await auto_process_trend(request)
+    from .trends import auto_pick_trend_video
+
+    admin_user = _admin_console_user()
+    try:
+        candidate = auto_pick_trend_video(
+            topic=request.topic,
+            location=request.location,
+            limit=request.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    response = _queue_youtube_job(
+        ProcessRequest(
+            url=candidate["url"],
+            num_clips=validate_num_clips(request.num_clips),
+        ),
+        admin_user,
+    )
+
+    return {
+        "job_id": response.job_id,
+        "message": response.message,
+        "candidate": candidate,
+    }
 
 
 @app.get(f"{ADMIN_ROUTE_PREFIX}/youtube/status")
 async def admin_get_youtube_publish_status(request: Request):
-    return await get_youtube_publish_status(request)
+    return await get_youtube_publish_status(request, _admin_console_user())
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/config")
 async def admin_set_youtube_publish_config(request: YouTubeConfigRequest):
-    return await set_youtube_publish_config(request)
+    return await set_youtube_publish_config(request, _admin_console_user())
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/auth/start")
 async def admin_start_youtube_auth(request: Request):
-    return await start_youtube_auth(request)
+    return await start_youtube_auth(request, _admin_console_user())
 
 
 @app.delete(f"{ADMIN_ROUTE_PREFIX}/youtube/connection")
 async def admin_disconnect_youtube():
-    return await disconnect_youtube()
+    return await disconnect_youtube(_admin_console_user())
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/upload")
 async def admin_upload_short_to_youtube(payload: YouTubeUploadRequest):
-    return await upload_short_to_youtube(payload)
+    return await upload_short_to_youtube(payload, _admin_console_user())
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/upload/batch")
 async def admin_upload_shorts_to_youtube(payload: YouTubeUploadBatchRequest):
-    return await upload_shorts_to_youtube(payload)
+    return await upload_shorts_to_youtube(payload, _admin_console_user())
 
 
 @app.get(f"{ADMIN_ROUTE_PREFIX}/shorts/{{filename}}")
@@ -1808,43 +2236,34 @@ async def admin_get_capabilities():
 # Frontend Serving
 # ========================================
 
-if FRONTEND_DIR.exists():
-    @app.get("/")
-    async def serve_frontend():
-        """Serve the frontend HTML page."""
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+if WEB_DIST_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(WEB_DIST_DIR / "assets")), name="frontend-assets")
+    
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        # Prevent API routes from being swallowed by the catch-all
+        if (
+            full_path.startswith("api/")
+            or full_path.startswith("docs")
+            or full_path.startswith("redoc")
+            or full_path in {"health", "openapi.json", "favicon.ico"}
+        ):
+             raise HTTPException(status_code=404)
+             
+        index_file = WEB_DIST_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(
+                str(index_file),
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
+        raise HTTPException(status_code=404, detail="Frontend build not found.")
 
-    @app.get(ADMIN_ROUTE_PREFIX)
-    async def serve_admin_frontend():
-        """Serve the admin console view."""
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
 
-    @app.get(f"{ADMIN_ROUTE_PREFIX}/")
-    async def serve_admin_frontend_slash():
-        """Serve the admin console view with trailing slash."""
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
-    
-    @app.get("/style.css")
-    async def serve_css():
-        """Serve the CSS file."""
-        return FileResponse(
-            str(FRONTEND_DIR / "style.css"), 
-            media_type="text/css"
-        )
-    
-    @app.get("/script.js")
-    async def serve_js():
-        """Serve the JavaScript file."""
-        return FileResponse(
-            str(FRONTEND_DIR / "script.js"), 
-            media_type="application/javascript"
-        )
-    
-    @app.get("/favicon.ico")
-    async def favicon():
-        """Return empty favicon to prevent 404."""
-        from fastapi.responses import Response
-        return Response(content=b"", media_type="image/x-icon", status_code=204)
+@app.get("/favicon.ico")
+async def favicon():
+    """Return empty favicon to prevent 404."""
+    from fastapi.responses import Response
+    return Response(content=b"", media_type="image/x-icon", status_code=204)
 
 
 # ========================================
@@ -1862,8 +2281,9 @@ async def health_check():
     
     return {
         "status": "healthy", 
-        "version": "2.0.0",
-        "ai_enabled": ai_status
+        "version": "3.0.0",
+        "ai_enabled": ai_status,
+        "database_enabled": database_enabled(),
     }
 
 

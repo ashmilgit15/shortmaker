@@ -11,10 +11,17 @@ import json
 import os
 import re
 import subprocess
-from time import perf_counter
+import time
+from datetime import timedelta
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
-from utils.binaries import ensure_ffmpeg_on_path, resolve_binary
+from time import perf_counter
+from typing import Any, Callable, Dict, List, Optional
+
+# Use absolute import for better compatibility
+try:
+    from utils.binaries import ensure_ffmpeg_on_path, resolve_binary
+except ImportError:
+    from .binaries import ensure_ffmpeg_on_path, resolve_binary
 
 ensure_ffmpeg_on_path()
 FFMPEG_PATH = resolve_binary("ffmpeg", required=True)
@@ -34,12 +41,9 @@ WIDE_LAYOUT_MODE = os.environ.get("SHORTMAKER_WIDE_LAYOUT", "crop").strip().lowe
 SHORTS_MAX_DURATION_SECONDS = 59.0
 
 
-def get_video_info(video_path: str) -> Dict:
+def get_video_info(video_path: str) -> Dict[str, Any]:
     """
     Get video metadata using ffprobe.
-
-    Returns:
-        Dict with width, height, duration, fps, and audio presence.
     """
     cmd = [
         FFPROBE_PATH,
@@ -53,30 +57,35 @@ def get_video_info(video_path: str) -> Dict:
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {result.stderr}")
+        
     data = json.loads(result.stdout)
-
-    video_stream = None
-    has_audio = False
-    for stream in data.get("streams", []):
-        if stream.get("codec_type") == "video" and video_stream is None:
-            video_stream = stream
-        if stream.get("codec_type") == "audio":
-            has_audio = True
+    streams = data.get("streams", [])
+    
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    has_audio = any(s.get("codec_type") == "audio" for s in streams)
 
     if not video_stream:
         raise ValueError("No video stream found")
 
     fps_str = video_stream.get("r_frame_rate", "30/1")
     if "/" in fps_str:
-        num, den = map(int, fps_str.split("/"))
-        fps = num / den if den else 30
+        try:
+            num, den = map(int, fps_str.split("/"))
+            fps = num / den if den else 30.0
+        except:
+            fps = 30.0
     else:
-        fps = float(fps_str)
+        fps = _safe_float(fps_str, 30.0)
+
+    format_data = data.get("format") or {}
+    duration = _safe_float(format_data.get("duration"), 0.0)
 
     return {
-        "width": int(video_stream.get("width", 1920)),
-        "height": int(video_stream.get("height", 1080)),
-        "duration": float(data.get("format", {}).get("duration", 0)),
+        "width": int(video_stream.get("width") or 1920),
+        "height": int(video_stream.get("height") or 1080),
+        "duration": duration,
         "fps": fps,
         "has_audio": has_audio,
     }
@@ -111,9 +120,11 @@ def calculate_center_crop(width: int, height: int) -> Dict:
     }
 
 
-def _safe_float(value: object, default: float) -> float:
+def _safe_float(value: Any, default: float) -> float:
+    if value is None:
+        return default
     try:
-        return float(value)
+        return float(value) # type: ignore
     except (TypeError, ValueError):
         return default
 
@@ -169,9 +180,13 @@ def _wrap_plain_text(text: str, max_chars: int = 22, max_lines: int = 2) -> str:
         lines.append(" ".join(current))
 
     if len(lines) > max_lines:
-        lines = lines[: max_lines - 1] + [" ".join(lines[max_lines - 1 :])]
+        # Explicit slicing and typed assignment
+        tail: List[str] = lines[max_lines - 1:]
+        last_line = " ".join(tail)
+        lines = lines[:max_lines - 1] + [last_line]
 
-    return r"\N".join(lines[:max_lines])
+    result_text = r"\N".join(lines[:max_lines])
+    return result_text
 
 
 def _display_word(word: str) -> str:
@@ -236,8 +251,9 @@ def _flatten_words(segments: List[Dict], clip_duration: float) -> List[Dict]:
             }
 
             if re.fullmatch(r"[.,!?;:]+", display) and tokens:
-                tokens[-1]["display"] += display
-                tokens[-1]["end"] = max(tokens[-1]["end"], token["end"])
+                last_token = tokens[-1]
+                last_token["display"] = (last_token.get("display") or "") + display
+                last_token["end"] = max(_safe_float(last_token.get("end")), _safe_float(token.get("end")))
                 continue
 
             tokens.append(token)
@@ -258,14 +274,16 @@ def _split_caption_lines(words: List[Dict], max_chars_per_line: int = 16, max_li
     current_length = 0
 
     for word in words:
-        projected = current_length + len(word["display"]) + (1 if lines[-1] else 0)
-        if lines[-1] and projected > max_chars_per_line and len(lines) < max_lines:
+        last_line = lines[-1]
+        projected = current_length + len(str(word.get("display", ""))) + (1 if last_line else 0)
+        
+        if last_line and projected > max_chars_per_line and len(lines) < max_lines:
             lines.append([word])
-            current_length = len(word["display"])
+            current_length = len(str(word.get("display", "")))
             continue
 
         lines[-1].append(word)
-        current_length = projected if lines[-1] else len(word["display"])
+        current_length = projected if lines[-1] else len(str(word.get("display", "")))
 
     return [line for line in lines if line]
 
@@ -369,7 +387,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     events: List[str] = []
 
     if caption_text:
-        hook_text = _wrap_plain_text(caption_text[:90], max_chars=20, max_lines=2)
+        hook_text_raw = caption_text[:90]
+        hook_text = _wrap_plain_text(hook_text_raw, max_chars=20, max_lines=2)
         hook_end = min(
             max(1.8, normalized_duration * 0.38),
             max(0.35, normalized_duration - 0.15),
@@ -692,8 +711,11 @@ def create_shorts(
         print(f"  Time: {highlight['start']:.1f}s - {capped_end_time:.1f}s")
         print(f"  Reason: {highlight.get('reason', 'unknown')}")
 
-        if progress_callback:
-            progress_callback(index - 1, len(highlights), output_path, highlight)
+        if progress_callback is not None:
+            try:
+                progress_callback(index - 1, len(highlights), output_path, highlight)
+            except Exception as e:
+                print(f"Warning: progress_callback error: {e}")
 
         started_at = perf_counter()
         extract_clip_with_captions(
@@ -709,8 +731,12 @@ def create_shorts(
         output_files.append(output_path)
         elapsed = perf_counter() - started_at
         print(f"  Saved: {output_path} ({elapsed:.1f}s)")
-        if progress_callback:
-            progress_callback(index, len(highlights), output_path, highlight)
+        
+        if progress_callback is not None:
+            try:
+                progress_callback(index, len(highlights), output_path, highlight)
+            except Exception as e:
+                pass
 
     return output_files
 

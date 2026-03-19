@@ -117,19 +117,27 @@ def _require_google_dependency(module_name: str):
 def get_youtube_status() -> dict:
     config = _load_config()
     oauth = _oauth_record_from_config(config)
+    connected = bool(oauth.get("refresh_token"))
+    authorized_at = oauth.get("authorized_at") if connected else oauth.get("authorized_at")
+    if connected:
+        message = "YouTube is connected and ready for uploads."
+    elif oauth.get("authorized_at"):
+        message = (
+            "A previous YouTube authorization exists, but no usable refresh token is available. "
+            "Reconnect the account or set YOUTUBE_REFRESH_TOKEN."
+        )
+    else:
+        message = "Add a YouTube OAuth client and connect an account."
     return {
         "has_client_config": bool(_client_id_from_config(config) and _client_secret_from_config(config)),
-        "connected": bool(oauth.get("refresh_token")),
-        "authorized_at": oauth.get("authorized_at"),
+        "connected": connected,
+        "authorized_at": authorized_at,
         "default_privacy_status": _normalize_privacy_status(
             config.get("youtube_default_privacy", DEFAULT_YOUTUBE_PRIVACY)
         ),
         "callback_path": _normalized_youtube_callback_path(),
-        "message": (
-            "YouTube is connected and ready for uploads."
-            if oauth.get("refresh_token")
-            else "Add a YouTube OAuth client and connect an account."
-        ),
+        "message": message,
+        "needs_reconnect": bool(oauth.get("authorized_at") and not connected),
     }
 
 

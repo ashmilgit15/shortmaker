@@ -1,0 +1,284 @@
+.view { max-width: 680px; }
+
+.card { padding: 2.25rem; }
+
+/* ── Card header ── */
+.cardTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.cardIcon {
+  width: 46px;
+  height: 46px;
+  background: linear-gradient(135deg, var(--accent-soft), var(--accent-2-soft));
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cardMIcon { font-size: 22px; color: var(--accent); }
+
+.cardInfo {}
+.cardTitle { font-size: 1.1875rem; font-weight: 800; letter-spacing: -0.025em; margin-bottom: 0.3rem; }
+.cardDesc  { font-size: 0.9rem; color: var(--text-secondary); line-height: 1.55; }
+
+/* ── Mode toggle ── */
+.modeToggle {
+  display: flex;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.modeBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.modeBtn:hover { color: var(--text-secondary); }
+
+.modeBtnActive {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-hover);
+}
+
+.modeBtnIcon { font-size: 16px; }
+
+/* ── Form ── */
+.form { display: flex; flex-direction: column; gap: 1.375rem; }
+
+.fieldGroup { display: flex; flex-direction: column; }
+
+.fieldLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 0.5rem;
+}
+
+.fieldLabelIcon { font-size: 14px; }
+
+.inputWrap { position: relative; }
+.inputWrap input { padding-right: 2.75rem; }
+
+.clearBtn {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-xs);
+  transition: color var(--transition);
+  padding: 0.2rem;
+}
+.clearBtn:hover { color: var(--text-primary); }
+.clearBtn span { font-size: 18px; }
+
+/* ── Drop zone ── */
+.dropZone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: 2.5rem 1.5rem;
+  cursor: pointer;
+  transition: all var(--transition);
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.dropZone:hover,
+.dropZoneActive {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dropZoneHasFile {
+  border-style: solid;
+  border-color: var(--success);
+  background: var(--success-soft);
+  cursor: default;
+  padding: 1.25rem 1.5rem;
+}
+
+.dropPlaceholder { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+
+.dropIcon { font-size: 40px; color: var(--text-muted); margin-bottom: 0.5rem; }
+
+.dropTitle { font-size: 1rem; font-weight: 700; color: var(--text-secondary); }
+
+.dropHint { font-size: 0.875rem; color: var(--text-muted); }
+
+.dropLink { color: var(--accent); font-weight: 600; }
+
+.fileInput {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.fileInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  text-align: left;
+}
+
+.fileIcon { font-size: 28px; color: var(--success); flex-shrink: 0; }
+
+.fileMeta { flex: 1; min-width: 0; }
+
+.fileName {
+  display: block;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileSize { font-size: 0.8125rem; color: var(--text-muted); }
+
+.fileRemove {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: center;
+  transition: color var(--transition);
+  flex-shrink: 0;
+}
+.fileRemove:hover { color: var(--error); }
+.fileRemove span { font-size: 18px; }
+
+/* ── Config row ── */
+.configRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+.configItem { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.configLabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.clipBtns { display: flex; gap: 0.375rem; }
+
+.clipBtn {
+  flex: 1;
+  padding: 0.5625rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.9375rem;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.clipBtn:hover:not(:disabled) { border-color: var(--border-hover); color: var(--text-primary); }
+.clipBtnOn { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.clipBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.modelBadge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5625rem 0.875rem;
+  background: var(--accent-2-soft);
+  border: 1px solid rgba(139, 92, 246, 0.18);
+  border-radius: var(--radius-sm);
+  color: var(--accent-2);
+  font-size: 0.875rem;
+  font-weight: 600;
+  height: fit-content;
+}
+.modelIcon { font-size: 16px; }
+
+/* ── Submit ── */
+.submitBtn {
+  height: 50px;
+  font-size: 0.9375rem;
+  border-radius: var(--radius-md);
+  letter-spacing: 0.02em;
+}
+
+.spinning { animation: spin 0.75s linear infinite; }
+
+/* ── Feature pills ── */
+.featurePills {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.25rem;
+}
+
+.featurePill {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.pillIcon { font-size: 15px; color: var(--accent); }
+
+@media (max-width: 640px) {
+  .card { padding: 1.25rem; }
+  .configRow { grid-template-columns: 1fr; }
+  .modeBtn { font-size: 0.8125rem; padding: 0.5rem 0.625rem; }
+  .featurePills { gap: 0.75rem; }
+}
