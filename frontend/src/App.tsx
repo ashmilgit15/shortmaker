@@ -38,7 +38,7 @@ function normalizeJob(job: Partial<Job> & { job_id?: string }): Job {
 
 export default function App() {
   const { isLoaded, isSignedIn } = useUser();
-  const { getToken, signOut } = useAuth();
+  const { getToken } = useAuth();
   const noticeTimeoutRef = useRef<number | null>(null);
   const responseWarningsRef = useRef<Set<string>>(new Set());
   const apiUnavailableUntilRef = useRef(0);
@@ -214,10 +214,9 @@ export default function App() {
     setSession(null);
     setAdminConfig(null);
     setAdminConfigError(null);
-    await signOut();
-    showNotice('error', CLERK_ISSUER_MISMATCH_MESSAGE);
+    showNotice('error', `${CLERK_ISSUER_MISMATCH_MESSAGE} If this persists, sign out and sign in again.`);
     return true;
-  }, [readResponseBody, showNotice, signOut]);
+  }, [readResponseBody, showNotice]);
 
   const handleProtectedAuthFailure = useCallback(async (res: Response | null) => {
     if (!res || res.status !== 401) {
