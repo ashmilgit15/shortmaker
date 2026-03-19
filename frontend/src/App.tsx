@@ -77,9 +77,23 @@ export default function App() {
     };
   }, []);
 
-  const authenticatedFetch = useCallback(async (path: string, options: RequestInit = {}) => {
+  const getBearerToken = useCallback(async () => {
     try {
-      const token = await getToken();
+      return (await getToken()) || null;
+    } catch (e) {
+      console.error('Fetch error:', e);
+      return null;
+    }
+  }, [getToken]);
+
+  const authenticatedFetch = useCallback(async (
+    path: string,
+    options: RequestInit = {},
+    tokenOverride: string | null = null,
+  ) => {
+    try {
+      const token = tokenOverride ?? await getBearerToken();
+      if (!token) return null;
       const res = await fetch(`${API_BASE}${apiPath(path)}`, {
         ...options,
         headers: {
@@ -92,7 +106,7 @@ export default function App() {
       console.error('Fetch error:', e);
       return null;
     }
-  }, [apiPath, getToken]);
+  }, [apiPath, getBearerToken]);
 
   const publicFetch = useCallback(async (path: string, options: RequestInit = {}) => {
     try {
@@ -103,9 +117,14 @@ export default function App() {
     }
   }, [apiPath]);
 
-  const authenticatedRootFetch = useCallback(async (path: string, options: RequestInit = {}) => {
+  const authenticatedRootFetch = useCallback(async (
+    path: string,
+    options: RequestInit = {},
+    tokenOverride: string | null = null,
+  ) => {
     try {
-      const token = await getToken();
+      const token = tokenOverride ?? await getBearerToken();
+      if (!token) return null;
       const res = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers: {
@@ -118,7 +137,7 @@ export default function App() {
       console.error('Fetch error:', e);
       return null;
     }
-  }, [getToken]);
+  }, [getBearerToken]);
 
   const reportResponseWarning = useCallback((key: string, message: string) => {
     if (!responseWarningsRef.current.has(key)) {
@@ -204,16 +223,22 @@ export default function App() {
     if (Date.now() < apiUnavailableUntilRef.current) return;
 
     try {
+      const token = isAdminConsoleRoute ? null : await getBearerToken();
+      if (!isAdminConsoleRoute && !token) {
+        return;
+      }
+
       const [jobsRes, capsRes, sessionRes] = await Promise.all([
-        (isAdminConsoleRoute ? publicFetch('/jobs/recent') : authenticatedFetch('/jobs/recent')),
+        (isAdminConsoleRoute ? publicFetch('/jobs/recent') : authenticatedFetch('/jobs/recent', {}, token)),
         publicFetch('/capabilities'),
-        authenticatedRootFetch('/session'),
+        (isAdminConsoleRoute ? Promise.resolve(null) : authenticatedRootFetch('/session', {}, token)),
       ]);
 
       if (await handleIssuerMismatch(jobsRes)) return;
       if (await handleIssuerMismatch(sessionRes)) return;
 
-      const apiUnavailable = [jobsRes, capsRes, sessionRes].some((res) => !res || res.status === 503);
+      const protectedResponses = isAdminConsoleRoute ? [jobsRes] : [jobsRes, sessionRes];
+      const apiUnavailable = [capsRes, ...protectedResponses].some((res) => !res || res.status === 503);
       if (apiUnavailable) {
         apiUnavailableUntilRef.current = Date.now() + API_UNAVAILABLE_BACKOFF_MS;
         if (!apiOfflineNoticeRef.current) {
@@ -248,7 +273,7 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
-  }, [authenticatedFetch, authenticatedRootFetch, handleIssuerMismatch, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, showNotice]);
+  }, [authenticatedFetch, authenticatedRootFetch, getBearerToken, handleIssuerMismatch, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, showNotice]);
 
   const fetchAdminConfig = useCallback(async () => {
     if (!isSignedIn || (!session?.is_admin && !isAdminConsoleRoute)) {
@@ -257,9 +282,13 @@ export default function App() {
       return;
     }
     try {
+      const token = isAdminConsoleRoute ? null : await getBearerToken();
+      if (!isAdminConsoleRoute && !token) {
+        return;
+      }
       const res = isAdminConsoleRoute
         ? await publicFetch('/ai/config')
-        : await authenticatedFetch('/ai/config');
+        : await authenticatedFetch('/ai/config', {}, token);
       if (await handleIssuerMismatch(res)) {
         return;
       }
@@ -280,7 +309,7 @@ export default function App() {
       setAdminConfig(null);
       setAdminConfigError('Failed to load admin settings.');
     }
-  }, [authenticatedFetch, extractErrorMessage, handleIssuerMismatch, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
+  }, [authenticatedFetch, extractErrorMessage, getBearerToken, handleIssuerMismatch, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
 
   useEffect(() => {
     if (isSignedIn) {

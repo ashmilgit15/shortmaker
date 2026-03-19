@@ -12,6 +12,15 @@ SHORTMAKER_SECRET_KEY_ENV = "SHORTMAKER_SECRET_KEY"
 YOUTUBE_REFRESH_TOKEN_ENV = "YOUTUBE_REFRESH_TOKEN"
 ENCRYPTED_SECRETS_KEY = "_encrypted_secrets"
 ENCRYPTED_REFRESH_TOKEN_KEY = "_youtube_refresh_token"
+PLACEHOLDER_SECRET_KEY_VALUES = {
+    "replace_with_fernet_key",
+    "replace-me",
+    "changeme",
+}
+
+_FERNET_CACHE_KEY: str | None = None
+_FERNET_CACHE_VALUE: Fernet | None = None
+_LAST_INVALID_KEY_LOGGED: str | None = None
 
 SECRET_FIELD_ENV_MAP: dict[str, str] = {
     "gemini_api_key": "GEMINI_API_KEY",
@@ -23,16 +32,32 @@ SECRET_FIELD_ENV_MAP: dict[str, str] = {
 
 
 def _get_fernet() -> Fernet | None:
+    global _FERNET_CACHE_KEY, _FERNET_CACHE_VALUE, _LAST_INVALID_KEY_LOGGED
+
     raw_key = os.environ.get(SHORTMAKER_SECRET_KEY_ENV, "").strip()
-    if not raw_key:
+    normalized_key = raw_key.lower()
+    if not raw_key or normalized_key in PLACEHOLDER_SECRET_KEY_VALUES:
+        _FERNET_CACHE_KEY = raw_key
+        _FERNET_CACHE_VALUE = None
         return None
+
+    if raw_key == _FERNET_CACHE_KEY:
+        return _FERNET_CACHE_VALUE
+
     try:
-        return Fernet(raw_key.encode("utf-8"))
+        fernet = Fernet(raw_key.encode("utf-8"))
+        _FERNET_CACHE_KEY = raw_key
+        _FERNET_CACHE_VALUE = fernet
+        return fernet
     except Exception:
-        logger.error(
-            "%s is not a valid Fernet key. Secret persistence is disabled.",
-            SHORTMAKER_SECRET_KEY_ENV,
-        )
+        _FERNET_CACHE_KEY = raw_key
+        _FERNET_CACHE_VALUE = None
+        if raw_key != _LAST_INVALID_KEY_LOGGED:
+            logger.warning(
+                "%s is not a valid Fernet key. Secret persistence is disabled until a valid key is configured.",
+                SHORTMAKER_SECRET_KEY_ENV,
+            )
+            _LAST_INVALID_KEY_LOGGED = raw_key
         return None
 
 
