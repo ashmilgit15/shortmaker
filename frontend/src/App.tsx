@@ -44,6 +44,8 @@ export default function App() {
   const apiUnavailableUntilRef = useRef(0);
   const apiOfflineNoticeRef = useRef(false);
   const issuerMismatchHandledRef = useRef(false);
+  const protectedPollInFlightRef = useRef(false);
+  const authFailureNoticeRef = useRef(false);
   const isAdminConsoleRoute = typeof window !== 'undefined' && window.location.pathname.startsWith(ADMIN_ROUTE_PREFIX);
 
   const [jobs, setJobs]                   = useState<Job[]>([]);
@@ -217,11 +219,32 @@ export default function App() {
     return true;
   }, [readResponseBody, showNotice, signOut]);
 
+  const handleProtectedAuthFailure = useCallback(async (res: Response | null) => {
+    if (!res || res.status !== 401) {
+      return false;
+    }
+    if (await handleIssuerMismatch(res)) {
+      return true;
+    }
+
+    setJobs([]);
+    setSession(null);
+    setAdminConfig(null);
+    setAdminConfigError('Session is not authorized. Sign in again.');
+    if (!authFailureNoticeRef.current) {
+      authFailureNoticeRef.current = true;
+      showNotice('error', 'Session is not authorized. Sign in again.');
+    }
+    return true;
+  }, [handleIssuerMismatch, showNotice]);
+
   const fetchData = useCallback(async () => {
     if (!isSignedIn) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     if (Date.now() < apiUnavailableUntilRef.current) return;
+    if (protectedPollInFlightRef.current) return;
 
+    protectedPollInFlightRef.current = true;
     try {
       const token = isAdminConsoleRoute ? null : await getBearerToken();
       if (!isAdminConsoleRoute && !token) {
@@ -234,8 +257,8 @@ export default function App() {
         (isAdminConsoleRoute ? Promise.resolve(null) : authenticatedRootFetch('/session', {}, token)),
       ]);
 
-      if (await handleIssuerMismatch(jobsRes)) return;
-      if (await handleIssuerMismatch(sessionRes)) return;
+      if (await handleProtectedAuthFailure(jobsRes)) return;
+      if (await handleProtectedAuthFailure(sessionRes)) return;
 
       const protectedResponses = isAdminConsoleRoute ? [jobsRes] : [jobsRes, sessionRes];
       const apiUnavailable = [capsRes, ...protectedResponses].some((res) => !res || res.status === 503);
@@ -250,6 +273,7 @@ export default function App() {
 
       apiUnavailableUntilRef.current = 0;
       apiOfflineNoticeRef.current = false;
+      authFailureNoticeRef.current = false;
 
       if (jobsRes?.ok) {
         const jobsPayload = await readResponseBody(jobsRes, { endpoint: '/jobs/recent', expectJson: true });
@@ -272,8 +296,10 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      protectedPollInFlightRef.current = false;
     }
-  }, [authenticatedFetch, authenticatedRootFetch, getBearerToken, handleIssuerMismatch, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, showNotice]);
+  }, [authenticatedFetch, authenticatedRootFetch, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, showNotice]);
 
   const fetchAdminConfig = useCallback(async () => {
     if (!isSignedIn || (!session?.is_admin && !isAdminConsoleRoute)) {
@@ -289,7 +315,7 @@ export default function App() {
       const res = isAdminConsoleRoute
         ? await publicFetch('/ai/config')
         : await authenticatedFetch('/ai/config', {}, token);
-      if (await handleIssuerMismatch(res)) {
+      if (await handleProtectedAuthFailure(res)) {
         return;
       }
       if (res?.ok) {
@@ -309,7 +335,7 @@ export default function App() {
       setAdminConfig(null);
       setAdminConfigError('Failed to load admin settings.');
     }
-  }, [authenticatedFetch, extractErrorMessage, getBearerToken, handleIssuerMismatch, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
+  }, [authenticatedFetch, extractErrorMessage, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
 
   useEffect(() => {
     if (isSignedIn) {
@@ -349,7 +375,11 @@ export default function App() {
   const handleUpload = async (file: File, numClips: number) => {
     setProcessing(true);
     try {
-      const token = await getToken();
+      const token = await getBearerToken();
+      if (!token) {
+        showNotice('error', 'Session is not authorized. Sign in again.');
+        return;
+      }
       const formData = new FormData();
       formData.append('file', file);
       formData.append('num_clips', String(numClips));

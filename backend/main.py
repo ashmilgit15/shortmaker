@@ -81,6 +81,7 @@ PUBLIC_DOCS_ENV = "SHORTMAKER_PUBLIC_DOCS"
 ALLOWED_ORIGINS_ENV = "SHORTMAKER_ALLOWED_ORIGINS"
 ALLOWED_HOSTS_ENV = "SHORTMAKER_ALLOWED_HOSTS"
 ALLOWED_CALLBACK_HOSTS_ENV = "SHORTMAKER_ALLOWED_CALLBACK_HOSTS"
+ALLOW_PRIVATE_CALLBACKS_ENV = "SHORTMAKER_ALLOW_PRIVATE_CALLBACKS"
 AUTH_MODE_KEY = "auth_mode"
 AUTH_MODE_QUICK = "quick"
 AUTH_MODE_PRODUCTION = "production"
@@ -101,6 +102,13 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 def _env_csv(name: str, default: str = "") -> list[str]:
     raw = os.environ.get(name, default)
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
 
 
 IS_PRODUCTION = os.environ.get(APP_ENV_ENV, "").strip().lower() == "production"
@@ -523,7 +531,22 @@ def _callback_host_allowed(hostname: str) -> bool:
     normalized = (hostname or "").strip().lower()
     if not normalized:
         return False
-    return normalized in allowed_hosts
+    for allowed_host in allowed_hosts:
+        if normalized == allowed_host:
+            return True
+        if allowed_host.startswith("*."):
+            suffix = allowed_host[2:]
+            if suffix and (normalized == suffix or normalized.endswith(f".{suffix}")):
+                return True
+        if allowed_host.startswith("."):
+            suffix = allowed_host[1:]
+            if suffix and (normalized == suffix or normalized.endswith(f".{suffix}")):
+                return True
+    return False
+
+
+def _allow_private_callbacks() -> bool:
+    return not IS_PRODUCTION and _env_flag(ALLOW_PRIVATE_CALLBACKS_ENV)
 
 
 def _safe_filename(filename: str) -> str:
@@ -555,7 +578,11 @@ def _validate_callback_url(url: str):
     except socket.gaierror as exc:
         raise HTTPException(status_code=400, detail=f"callback_url host could not be resolved: {exc}") from exc
     resolved_ips = {entry[4][0] for entry in resolved_hosts if entry and entry[4]}
-    if not resolved_ips or not all(_is_public_ip(ip) for ip in resolved_ips):
+    if not resolved_ips:
+        raise HTTPException(status_code=400, detail="callback_url host could not be resolved")
+    if _allow_private_callbacks():
+        return
+    if not all(_is_public_ip(ip) for ip in resolved_ips):
         raise HTTPException(status_code=400, detail="callback_url must resolve only to public IP addresses")
 
 
