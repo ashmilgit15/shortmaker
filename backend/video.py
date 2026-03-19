@@ -3,6 +3,7 @@ video.py - YouTube video downloader using yt-dlp
 """
 
 import os
+import time
 import yt_dlp
 from pathlib import Path
 from utils.binaries import ensure_ffmpeg_on_path, resolve_binary
@@ -14,8 +15,38 @@ YTDLP_FORMAT = os.environ.get(
     "bv*[height<=1080]+ba/"
     "b[height<=1080][ext=mp4]/b[height<=1080]/best",
 )
+YTDLP_RETRIES = int(os.environ.get("SHORTMAKER_YTDLP_RETRIES", "6"))
+YTDLP_FRAGMENT_RETRIES = int(os.environ.get("SHORTMAKER_YTDLP_FRAGMENT_RETRIES", "8"))
+YTDLP_EXTRACTOR_RETRIES = int(os.environ.get("SHORTMAKER_YTDLP_EXTRACTOR_RETRIES", "3"))
+YTDLP_SOCKET_TIMEOUT = int(os.environ.get("SHORTMAKER_YTDLP_SOCKET_TIMEOUT", "30"))
+YTDLP_HTTP_CHUNK_SIZE = int(os.environ.get("SHORTMAKER_YTDLP_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024)))
+YTDLP_OUTER_RETRY_ATTEMPTS = int(os.environ.get("SHORTMAKER_YTDLP_OUTER_RETRY_ATTEMPTS", "3"))
+YTDLP_RETRY_BACKOFF_SECONDS = float(os.environ.get("SHORTMAKER_YTDLP_RETRY_BACKOFF_SECONDS", "2.5"))
 
 ensure_ffmpeg_on_path()
+
+
+def _build_ydl_common_opts() -> dict:
+    return {
+        'js_runtimes': YT_DLP_JS_RUNTIMES,
+        'retries': YTDLP_RETRIES,
+        'fragment_retries': YTDLP_FRAGMENT_RETRIES,
+        'extractor_retries': YTDLP_EXTRACTOR_RETRIES,
+        'file_access_retries': 3,
+        'socket_timeout': YTDLP_SOCKET_TIMEOUT,
+        'http_chunk_size': YTDLP_HTTP_CHUNK_SIZE,
+        'concurrent_fragment_downloads': 1,
+    }
+
+
+def _clear_partial_downloads(output_dir: str, video_id: str) -> None:
+    output_path = Path(output_dir)
+    for candidate in output_path.glob(f"{video_id}*"):
+        if candidate.suffix in {".part", ".ytdl"} or candidate.name.endswith(".mp4.part"):
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
 
 
 def get_video_info(url: str) -> dict:
@@ -27,7 +58,7 @@ def get_video_info(url: str) -> dict:
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
-        'js_runtimes': YT_DLP_JS_RUNTIMES,
+        **_build_ydl_common_opts(),
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -77,14 +108,33 @@ def download_video(url: str, output_dir: str) -> dict:
         'noplaylist': True,
         'quiet': False,
         'no_warnings': False,
-        'js_runtimes': YT_DLP_JS_RUNTIMES,
         'remote_components': ['ejs:github'],
+        **_build_ydl_common_opts(),
     }
     if ffmpeg_location:
         ydl_opts['ffmpeg_location'] = ffmpeg_location
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+
+    last_error = None
+    for attempt in range(1, YTDLP_OUTER_RETRY_ATTEMPTS + 1):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            last_error = None
+            break
+        except yt_dlp.utils.DownloadError as exc:
+            last_error = exc
+            if attempt >= YTDLP_OUTER_RETRY_ATTEMPTS:
+                raise
+            _clear_partial_downloads(output_dir, info['id'])
+            sleep_seconds = YTDLP_RETRY_BACKOFF_SECONDS * attempt
+            print(
+                f"yt-dlp download attempt {attempt}/{YTDLP_OUTER_RETRY_ATTEMPTS} failed; "
+                f"retrying in {sleep_seconds:.1f}s: {exc}"
+            )
+            time.sleep(sleep_seconds)
+
+    if last_error is not None:
+        raise last_error
         
     # Find the downloaded file
     video_id = info['id']

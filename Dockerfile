@@ -11,6 +11,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
      ffmpeg \
      git \
+     nodejs \
+     npm \
      ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -19,6 +21,15 @@ RUN useradd --create-home --uid 10001 --shell /bin/bash appuser
 COPY requirements.txt requirements.txt
 RUN python -m pip install --upgrade pip \
   && pip install --no-cache-dir -r requirements.txt
+
+COPY frontend/package.json frontend/package.json
+COPY frontend/tsconfig.json frontend/tsconfig.json
+COPY frontend/tsconfig.app.json frontend/tsconfig.app.json
+COPY frontend/tsconfig.node.json frontend/tsconfig.node.json
+COPY frontend/vite.config.ts frontend/vite.config.ts
+COPY frontend/index.html frontend/index.html
+COPY frontend/src frontend/src
+RUN cd frontend && npm install
 
 # Optional local Whisper fallback (disabled by default to keep deployment lightweight)
 ARG INSTALL_LOCAL_WHISPER=false

@@ -3,16 +3,48 @@ services:
     name: shortmaker
     runtime: docker
     region: oregon
-    plan: free
+    plan: starter
     healthCheckPath: /health
     autoDeploy: true
     dockerfilePath: ./Dockerfile
     envVars:
-      - key: SHORTMAKER_AUTH_MODE
-        value: production
-      - key: SHORTMAKER_ADMIN_TOKEN
-        value: "replace-with-admin-secret-before-deploy"
+      - key: SHORTMAKER_ENV
+        value: "production"
+      - key: SHORTMAKER_PUBLIC_DOCS
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: VITE_CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_ISSUER
+        sync: false
+      - key: SHORTMAKER_SECRET_KEY
+        sync: false
+      - key: SHORTMAKER_ADMIN_EMAILS
+        sync: false
+      - key: SHORTMAKER_ALLOWED_ORIGINS
+        value: "https://shortmaker.onrender.com"
+      - key: SHORTMAKER_ALLOWED_HOSTS
+        value: "shortmaker.onrender.com"
+      - key: SHORTMAKER_YOUTUBE_OAUTH_BASE_URL
+        value: "https://shortmaker.onrender.com"
+      - key: SHORTMAKER_YOUTUBE_OAUTH_CALLBACK_URI
+        value: "https://shortmaker.onrender.com/youtube/oauth/callback"
+      - key: SHORTMAKER_ALLOWED_CALLBACK_HOSTS
+        value: ""
       - key: GEMINI_API_KEY
-        value: "replace-with-gemini-key-before-deploy"
+        sync: false
       - key: GROQ_API_KEY
-        value: "replace-with-groq-key-before-deploy"
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: YOUTUBE_CLIENT_ID
+        sync: false
+      - key: YOUTUBE_CLIENT_SECRET
+        sync: false
+      - key: YOUTUBE_REFRESH_TOKEN
+        sync: false
+      - key: SHORTMAKER_VIDEO_PRESET
+        value: "veryfast"
+      - key: SHORTMAKER_VIDEO_CRF
+        value: "19"

@@ -17,6 +17,7 @@ import logging
 from typing import List, Dict, Optional, Tuple, Any
 from pathlib import Path
 from utils.env_loader import load_dotenv_file
+from utils.secret_store import apply_runtime_secrets, sanitize_persisted_config
 
 logger = logging.getLogger(__name__)
 SHORTS_MAX_DURATION_SECONDS = 59.0
@@ -52,24 +53,23 @@ def load_config() -> dict:
                 config.update(saved)
     except Exception as e:
         logger.error(f"Error loading config: {e}")
-    return config
+    return apply_runtime_secrets(config)
 
 
 def save_config(config: dict):
     """Save AI configuration to .env.json"""
     try:
+        persisted = sanitize_persisted_config(config)
         with open(CONFIG_FILE, 'w') as f:
-            json.dump(config, f, indent=2)
+            json.dump(persisted, f, indent=2)
     except Exception as e:
         logger.error(f"Error saving config: {e}")
 
 
 def get_api_key() -> Optional[str]:
     """Get the Gemini API key from config or environment."""
-    key = os.environ.get("GEMINI_API_KEY", "")
-    if not key:
-        config = load_config()
-        key = config.get("gemini_api_key", "")
+    config = load_config()
+    key = config.get("gemini_api_key", "")
     return key if key else None
 
 
