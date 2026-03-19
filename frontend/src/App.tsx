@@ -14,12 +14,31 @@ import SettingsView from './components/SettingsView';
 import styles from './App.module.css';
 
 const API_BASE = (import.meta as any).env.VITE_API_BASE_URL || '';
+const CLERK_PUBLISHABLE_KEY = (import.meta as any).env.VITE_CLERK_PUBLISHABLE_KEY || '';
 const API_UNAVAILABLE_BACKOFF_MS = 30_000;
 const API_UNAVAILABLE_MESSAGE =
   'ShortMaker API is not reachable at http://127.0.0.1:8000. Start FastAPI or set VITE_API_BASE_URL.';
 const CLERK_ISSUER_MISMATCH_DETAIL = 'Token issuer does not match configured Clerk issuer.';
 const CLERK_ISSUER_MISMATCH_MESSAGE = 'Session is tied to a different Clerk instance. Sign in again.';
 const ADMIN_ROUTE_PREFIX = '/ashmil2010';
+const CLERK_ISSUER_SETTLE_MS = 15_000;
+
+function normalizeIssuer(value: string): string {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function deriveIssuerFromPublishableKey(publishableKey: string): string {
+  const raw = String(publishableKey || '').trim();
+  const match = raw.match(/^pk_(?:test|live)_(.+)$/);
+  if (!match) return '';
+
+  try {
+    const decoded = atob(match[1]).replace(/\$+$/, '');
+    return normalizeIssuer(`https://${decoded}`);
+  } catch {
+    return '';
+  }
+}
 
 function normalizeJob(job: Partial<Job> & { job_id?: string }): Job {
   const rawProgress = typeof job.progress === 'number' ? job.progress : 0;
@@ -38,15 +57,19 @@ function normalizeJob(job: Partial<Job> & { job_id?: string }): Job {
 
 export default function App() {
   const { isLoaded, isSignedIn } = useUser();
-  const { getToken } = useAuth();
+  const { getToken, sessionClaims } = useAuth();
   const noticeTimeoutRef = useRef<number | null>(null);
   const responseWarningsRef = useRef<Set<string>>(new Set());
   const apiUnavailableUntilRef = useRef(0);
   const apiOfflineNoticeRef = useRef(false);
   const issuerMismatchHandledRef = useRef(false);
+  const issuerMismatchDetectedAtRef = useRef<number | null>(null);
   const protectedPollInFlightRef = useRef(false);
   const authFailureNoticeRef = useRef(false);
   const isAdminConsoleRoute = typeof window !== 'undefined' && window.location.pathname.startsWith(ADMIN_ROUTE_PREFIX);
+  const expectedClerkIssuer = deriveIssuerFromPublishableKey(CLERK_PUBLISHABLE_KEY);
+  const sessionIssuer = normalizeIssuer(String(sessionClaims?.iss || ''));
+  const frontendIssuerMismatch = Boolean(expectedClerkIssuer && sessionIssuer && sessionIssuer !== expectedClerkIssuer);
 
   const [jobs, setJobs]                   = useState<Job[]>([]);
   const [adminConfig, setAdminConfig]     = useState<AdminConfig | null>(null);
@@ -209,11 +232,22 @@ export default function App() {
       return false;
     }
 
-    issuerMismatchHandledRef.current = true;
     setJobs([]);
     setSession(null);
     setAdminConfig(null);
     setAdminConfigError(null);
+    const now = Date.now();
+    if (!issuerMismatchDetectedAtRef.current) {
+      issuerMismatchDetectedAtRef.current = now;
+      showNotice('info', 'Finishing sign-in. Waiting for Clerk session to refresh...');
+      return true;
+    }
+
+    if (now - issuerMismatchDetectedAtRef.current < CLERK_ISSUER_SETTLE_MS) {
+      return true;
+    }
+
+    issuerMismatchHandledRef.current = true;
     showNotice('error', `${CLERK_ISSUER_MISMATCH_MESSAGE} If this persists, sign out and sign in again.`);
     return true;
   }, [readResponseBody, showNotice]);
@@ -242,6 +276,20 @@ export default function App() {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     if (Date.now() < apiUnavailableUntilRef.current) return;
     if (protectedPollInFlightRef.current) return;
+    if (frontendIssuerMismatch) {
+      if (!issuerMismatchDetectedAtRef.current) {
+        issuerMismatchDetectedAtRef.current = Date.now();
+      }
+      if (!issuerMismatchHandledRef.current && Date.now() - issuerMismatchDetectedAtRef.current >= CLERK_ISSUER_SETTLE_MS) {
+        issuerMismatchHandledRef.current = true;
+        setJobs([]);
+        setSession(null);
+        setAdminConfig(null);
+        setAdminConfigError(null);
+        showNotice('error', `${CLERK_ISSUER_MISMATCH_MESSAGE} If this persists, sign out and sign in again.`);
+      }
+      return;
+    }
 
     protectedPollInFlightRef.current = true;
     try {
@@ -273,6 +321,8 @@ export default function App() {
       apiUnavailableUntilRef.current = 0;
       apiOfflineNoticeRef.current = false;
       authFailureNoticeRef.current = false;
+      issuerMismatchDetectedAtRef.current = null;
+      issuerMismatchHandledRef.current = false;
 
       if (jobsRes?.ok) {
         const jobsPayload = await readResponseBody(jobsRes, { endpoint: '/jobs/recent', expectJson: true });
@@ -298,7 +348,7 @@ export default function App() {
     } finally {
       protectedPollInFlightRef.current = false;
     }
-  }, [authenticatedFetch, authenticatedRootFetch, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, showNotice]);
+  }, [authenticatedFetch, authenticatedRootFetch, frontendIssuerMismatch, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, showNotice]);
 
   const fetchAdminConfig = useCallback(async () => {
     if (!isSignedIn || (!session?.is_admin && !isAdminConsoleRoute)) {
@@ -322,6 +372,8 @@ export default function App() {
         if (configPayload) {
           setAdminConfig(configPayload as AdminConfig);
           setAdminConfigError(null);
+          issuerMismatchDetectedAtRef.current = null;
+          issuerMismatchHandledRef.current = false;
         }
       } else if (res?.status === 403) {
         setAdminConfig(null);
