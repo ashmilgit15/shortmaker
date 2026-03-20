@@ -1,5 +1,7 @@
 .env.json
 .env
+.env.render
+.env.vercel
 .env.local
 frontend/.env.local
 outputs/
