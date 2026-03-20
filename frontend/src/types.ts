@@ -73,6 +73,27 @@ export interface AdminConfig {
   message?: string;
 }
 
+export interface YouTubeStatus {
+  has_client_config: boolean;
+  has_personal_config?: boolean;
+  has_personal_client_config?: boolean;
+  using_shared_fallback?: boolean;
+  connected: boolean;
+  authorized_at?: string;
+  default_privacy_status?: string;
+  callback_path?: string;
+  message?: string;
+  needs_reconnect?: boolean;
+  scope?: 'shared' | 'user';
+  scope_owner_id?: string | null;
+  shared_status?: {
+    has_client_config: boolean;
+    connected: boolean;
+    authorized_at?: string;
+    default_privacy_status?: string;
+  };
+}
+
 export interface Capabilities {
   supports_uploads: boolean;
   supports_trend_discovery: boolean;

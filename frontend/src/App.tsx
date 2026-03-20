@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useUser, useAuth } from '@clerk/react';
 
-import { Job, AdminConfig, Capabilities, SessionData, NoticeData } from './types';
+import { Job, AdminConfig, Capabilities, SessionData, NoticeData, YouTubeStatus } from './types';
 import LandingPage from './components/LandingPage';
 import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
@@ -74,12 +74,16 @@ export default function App() {
   const [jobs, setJobs]                   = useState<Job[]>([]);
   const [adminConfig, setAdminConfig]     = useState<AdminConfig | null>(null);
   const [adminConfigError, setAdminConfigError] = useState<string | null>(null);
+  const [youtubeStatus, setYouTubeStatus] = useState<YouTubeStatus | null>(null);
   const [capabilities, setCapabilities]   = useState<Capabilities | null>(null);
   const [session, setSession]             = useState<SessionData | null>(null);
   const [notice, setNotice]               = useState<NoticeData | null>(null);
   const [activeTab, setActiveTab]         = useState<string>(isAdminConsoleRoute ? 'settings' : 'process');
   const [processing, setProcessing]       = useState<boolean>(false);
   const [settingsSaving, setSettingsSaving] = useState<boolean>(false);
+  const [youtubeSaving, setYouTubeSaving] = useState<boolean>(false);
+  const [backendSessionVerified, setBackendSessionVerified] = useState<boolean>(false);
+  const [backendAuthMessage, setBackendAuthMessage] = useState<string | null>(null);
 
   const apiPath = useCallback((path: string) => {
     if (!isAdminConsoleRoute) return path;
@@ -236,9 +240,12 @@ export default function App() {
     setSession(null);
     setAdminConfig(null);
     setAdminConfigError(null);
+    setYouTubeStatus(null);
+    setBackendSessionVerified(false);
     const now = Date.now();
     if (!issuerMismatchDetectedAtRef.current) {
       issuerMismatchDetectedAtRef.current = now;
+      setBackendAuthMessage('Finishing sign-in. Waiting for Clerk session to refresh...');
       showNotice('info', 'Finishing sign-in. Waiting for Clerk session to refresh...');
       return true;
     }
@@ -248,6 +255,7 @@ export default function App() {
     }
 
     issuerMismatchHandledRef.current = true;
+    setBackendAuthMessage(`${CLERK_ISSUER_MISMATCH_MESSAGE} If this persists, sign out and sign in again.`);
     showNotice('error', `${CLERK_ISSUER_MISMATCH_MESSAGE} If this persists, sign out and sign in again.`);
     return true;
   }, [readResponseBody, showNotice]);
@@ -263,7 +271,10 @@ export default function App() {
     setJobs([]);
     setSession(null);
     setAdminConfig(null);
+    setYouTubeStatus(null);
+    setBackendSessionVerified(false);
     setAdminConfigError('Session is not authorized. Sign in again.');
+    setBackendAuthMessage('Session is not authorized. Sign in again.');
     if (!authFailureNoticeRef.current) {
       authFailureNoticeRef.current = true;
       showNotice('error', 'Session is not authorized. Sign in again.');
@@ -271,14 +282,28 @@ export default function App() {
     return true;
   }, [handleIssuerMismatch, showNotice]);
 
+  const authenticatedProtectedFetch = useCallback(async (
+    path: string,
+    options: RequestInit = {},
+    tokenOverride: string | null = null,
+  ) => {
+    const res = await authenticatedFetch(path, options, tokenOverride);
+    if (await handleProtectedAuthFailure(res)) {
+      return null;
+    }
+    return res;
+  }, [authenticatedFetch, handleProtectedAuthFailure]);
+
   const fetchData = useCallback(async () => {
-    if (!isSignedIn) return;
+    if (!isLoaded || !isSignedIn) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     if (Date.now() < apiUnavailableUntilRef.current) return;
     if (protectedPollInFlightRef.current) return;
     if (frontendIssuerMismatch) {
+      setBackendSessionVerified(false);
       if (!issuerMismatchDetectedAtRef.current) {
         issuerMismatchDetectedAtRef.current = Date.now();
+        setBackendAuthMessage('Finishing sign-in. Waiting for Clerk session to refresh...');
       }
       if (!issuerMismatchHandledRef.current && Date.now() - issuerMismatchDetectedAtRef.current >= CLERK_ISSUER_SETTLE_MS) {
         issuerMismatchHandledRef.current = true;
@@ -286,6 +311,7 @@ export default function App() {
         setSession(null);
         setAdminConfig(null);
         setAdminConfigError(null);
+        setBackendAuthMessage(`${CLERK_ISSUER_MISMATCH_MESSAGE} If this persists, sign out and sign in again.`);
         showNotice('error', `${CLERK_ISSUER_MISMATCH_MESSAGE} If this persists, sign out and sign in again.`);
       }
       return;
@@ -298,16 +324,18 @@ export default function App() {
         return;
       }
 
-      const [jobsRes, capsRes, sessionRes] = await Promise.all([
+      const [jobsRes, capsRes, sessionRes, youtubeRes] = await Promise.all([
         (isAdminConsoleRoute ? publicFetch('/jobs/recent') : authenticatedFetch('/jobs/recent', {}, token)),
         publicFetch('/capabilities'),
         (isAdminConsoleRoute ? Promise.resolve(null) : authenticatedRootFetch('/session', {}, token)),
+        (isAdminConsoleRoute ? publicFetch('/youtube/status') : authenticatedFetch('/youtube/status', {}, token)),
       ]);
 
       if (await handleProtectedAuthFailure(jobsRes)) return;
       if (await handleProtectedAuthFailure(sessionRes)) return;
+      if (await handleProtectedAuthFailure(youtubeRes)) return;
 
-      const protectedResponses = isAdminConsoleRoute ? [jobsRes] : [jobsRes, sessionRes];
+      const protectedResponses = isAdminConsoleRoute ? [jobsRes, youtubeRes] : [jobsRes, sessionRes, youtubeRes];
       const apiUnavailable = [capsRes, ...protectedResponses].some((res) => !res || res.status === 503);
       if (apiUnavailable) {
         apiUnavailableUntilRef.current = Date.now() + API_UNAVAILABLE_BACKOFF_MS;
@@ -323,6 +351,7 @@ export default function App() {
       authFailureNoticeRef.current = false;
       issuerMismatchDetectedAtRef.current = null;
       issuerMismatchHandledRef.current = false;
+      setBackendAuthMessage(null);
 
       if (jobsRes?.ok) {
         const jobsPayload = await readResponseBody(jobsRes, { endpoint: '/jobs/recent', expectJson: true });
@@ -337,10 +366,17 @@ export default function App() {
           setCapabilities(capabilitiesPayload as Capabilities);
         }
       }
+      if (youtubeRes?.ok) {
+        const youtubePayload = await readResponseBody(youtubeRes, { endpoint: '/youtube/status', expectJson: true });
+        if (youtubePayload) {
+          setYouTubeStatus(youtubePayload as YouTubeStatus);
+        }
+      }
       if (sessionRes?.ok) {
         const sessionPayload = await readResponseBody(sessionRes, { endpoint: '/session', expectJson: true });
         if (sessionPayload) {
           setSession(sessionPayload as SessionData);
+          setBackendSessionVerified(true);
         }
       }
     } catch (e) {
@@ -349,6 +385,22 @@ export default function App() {
       protectedPollInFlightRef.current = false;
     }
   }, [authenticatedFetch, authenticatedRootFetch, frontendIssuerMismatch, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, showNotice]);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setBackendSessionVerified(false);
+      setBackendAuthMessage(null);
+      setJobs([]);
+      setSession(null);
+      setAdminConfig(null);
+      setAdminConfigError(null);
+      setYouTubeStatus(null);
+      authFailureNoticeRef.current = false;
+      issuerMismatchHandledRef.current = false;
+      issuerMismatchDetectedAtRef.current = null;
+      protectedPollInFlightRef.current = false;
+    }
+  }, [isSignedIn]);
 
   const fetchAdminConfig = useCallback(async () => {
     if (!isSignedIn || (!session?.is_admin && !isAdminConsoleRoute)) {
@@ -389,13 +441,12 @@ export default function App() {
   }, [authenticatedFetch, extractErrorMessage, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
 
   useEffect(() => {
-    if (isSignedIn) {
-      fetchData();
-      fetchAdminConfig();
-      const interval = setInterval(fetchData, 8000);
-      return () => clearInterval(interval);
-    }
-  }, [fetchAdminConfig, fetchData, isSignedIn]);
+    if (!isLoaded || !isSignedIn) return;
+    fetchData();
+    fetchAdminConfig();
+    const interval = setInterval(fetchData, 8000);
+    return () => clearInterval(interval);
+  }, [fetchAdminConfig, fetchData, isLoaded, isSignedIn]);
 
   // ── Process (YouTube URL) ──────────────────────────────────────────────
   const handleProcess = async (url: string, numClips: number) => {
@@ -462,7 +513,7 @@ export default function App() {
       title: `${job.video_title || job.filename || 'Short'} #${i + 1}`,
       description: '#Shorts',
       tags: ['Shorts'],
-      privacy_status: adminConfig?.youtube_default_privacy || 'private',
+      privacy_status: youtubeStatus?.default_privacy_status || adminConfig?.youtube_default_privacy || 'private',
     }));
     try {
       const res = await authenticatedFetch('/youtube/upload/batch', {
@@ -523,13 +574,34 @@ export default function App() {
       const res = await authenticatedFetch('/youtube/connection', { method: 'DELETE' });
       if (res?.ok) {
         showNotice('info', 'YouTube disconnected.');
-        fetchAdminConfig();
         fetchData();
       } else {
         showNotice('error', await extractErrorMessage(res, 'Disconnect failed'));
       }
     } catch {
       showNotice('error', 'Disconnect failed');
+    }
+  };
+
+  const handleSaveYouTubeConfig = async (payload: object) => {
+    setYouTubeSaving(true);
+    try {
+      const res = await authenticatedFetch('/youtube/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await readResponseBody(res, { endpoint: '/youtube/config', expectJson: true });
+      if (res?.ok) {
+        showNotice('success', data?.message || 'YouTube settings saved.');
+        fetchData();
+      } else {
+        showNotice('error', data?.detail || 'Unable to save YouTube settings.');
+      }
+    } catch {
+      showNotice('error', 'Unable to save YouTube settings.');
+    } finally {
+      setYouTubeSaving(false);
     }
   };
 
@@ -613,7 +685,7 @@ export default function App() {
 
   const isAdmin = isAdminConsoleRoute || !!session?.is_admin;
   const canManageYouTube = isSignedIn;
-  const youtubeConnected = !!(capabilities?.has_youtube_connection || adminConfig?.has_youtube_connection);
+  const youtubeConnected = !!youtubeStatus?.connected;
 
   return (
     <div className="app-shell">
@@ -668,30 +740,28 @@ export default function App() {
               )}
               {activeTab === 'trends' && (
                 <TrendsView
-                  apiFetch={authenticatedFetch}
+                  apiFetch={authenticatedProtectedFetch}
                   showNotice={showNotice}
                   onProcessUrl={(url) => handleProcess(url, 5)}
+                  authReady={isAdminConsoleRoute || backendSessionVerified}
+                  authMessage={backendAuthMessage}
                 />
               )}
               {activeTab === 'settings' && (
-                adminConfig ? (
-                  <SettingsView
-                    config={adminConfig}
-                    session={session}
-                    onSaveAIConfig={handleSaveAIConfig}
-                    onConnectYouTube={handleConnectYouTube}
-                    onDisconnectYouTube={handleDisconnectYouTube}
-                    saving={settingsSaving}
-                  />
-                ) : (
-                  <div className="empty-state">
-                    <span className="material-symbols-outlined">settings</span>
-                    <p>{adminConfigError || 'Loading admin settings...'}</p>
-                    <button type="button" className="btn btn-secondary" onClick={fetchAdminConfig}>
-                      Retry
-                    </button>
-                  </div>
-                )
+                <SettingsView
+                  config={adminConfig}
+                  youtubeStatus={youtubeStatus}
+                  session={session}
+                  isAdmin={isAdmin}
+                  adminConfigError={adminConfigError}
+                  onRetryAdminConfig={fetchAdminConfig}
+                  onSaveAIConfig={handleSaveAIConfig}
+                  onSaveYouTubeConfig={handleSaveYouTubeConfig}
+                  onConnectYouTube={handleConnectYouTube}
+                  onDisconnectYouTube={handleDisconnectYouTube}
+                  saving={settingsSaving}
+                  youtubeSaving={youtubeSaving}
+                />
               )}
             </div>
           </main>

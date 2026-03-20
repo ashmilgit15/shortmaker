@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from typing import List, Dict, Optional
 from pathlib import Path
-from utils.binaries import ensure_ffmpeg_on_path
+from utils.binaries import ensure_ffmpeg_on_path, resolve_binary
 from utils.env_loader import load_dotenv_file
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 # ========================================
 
 BASE_DIR = Path(__file__).parent.parent
-load_dotenv_file(BASE_DIR / ".env")
+CLERK_RUNTIME_KEYS = ("CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL")
+load_dotenv_file(BASE_DIR / ".env", override_keys=CLERK_RUNTIME_KEYS, clear_missing_keys=CLERK_RUNTIME_KEYS)
 CONFIG_FILE = BASE_DIR / ".env.json"
 
 ensure_ffmpeg_on_path()
@@ -115,8 +116,9 @@ def extract_audio(video_path: str, output_path: str) -> str:
     Extract audio from video using FFmpeg.
     Converts to mp3 for smaller file size (Groq has 25MB limit).
     """
+    ffmpeg_bin = resolve_binary("ffmpeg", required=True)
     cmd = [
-        "ffmpeg", "-y",
+        ffmpeg_bin, "-y",
         "-i", video_path,
         "-vn",  # No video
         "-acodec", "libmp3lame",
@@ -146,12 +148,17 @@ def split_audio_chunks(audio_path: str, max_size_mb: float = 24.0) -> List[str]:
         return [audio_path]
     
     # Get audio duration
-    cmd = [
-        "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-        "-of", "json", audio_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    duration = float(json.loads(result.stdout)["format"]["duration"])
+    ffprobe_bin = resolve_binary("ffprobe", required=False)
+    if ffprobe_bin:
+        cmd = [
+            ffprobe_bin, "-v", "quiet", "-show_entries", "format=duration",
+            "-of", "json", audio_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        duration = float(json.loads(result.stdout)["format"]["duration"])
+    else:
+        # Audio is encoded at a constant 64 kbps in extract_audio().
+        duration = (os.path.getsize(audio_path) * 8) / 64_000
     
     # Calculate chunk duration to keep each under max_size
     num_chunks = int(file_size / max_size_mb) + 1
@@ -164,9 +171,10 @@ def split_audio_chunks(audio_path: str, max_size_mb: float = 24.0) -> List[str]:
     for i in range(num_chunks):
         start = i * chunk_duration
         chunk_path = os.path.join(base_dir, f"{base_name}_chunk{i}.mp3")
+        ffmpeg_bin = resolve_binary("ffmpeg", required=True)
         
         cmd = [
-            "ffmpeg", "-y",
+            ffmpeg_bin, "-y",
             "-i", audio_path,
             "-ss", str(start),
             "-t", str(chunk_duration),

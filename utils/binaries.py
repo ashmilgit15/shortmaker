@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from functools import lru_cache
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +14,7 @@ _WINDOWS_FFMPEG_DIRS = (
     r"C:\ffmpeg\ffmpeg-8.0.1-essentials_build\bin",
     r"C:\ffmpeg\bin",
 )
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _iter_candidate_paths(binary_name: str):
@@ -30,7 +31,79 @@ def _iter_candidate_paths(binary_name: str):
             yield candidate
 
 
-@lru_cache(maxsize=8)
+def _resolve_imageio_ffmpeg(binary_name: str) -> Optional[str]:
+    if binary_name.lower() not in {"ffmpeg", "ffprobe"}:
+        return None
+
+    try:
+        import imageio_ffmpeg
+    except Exception:
+        return None
+
+    try:
+        ffmpeg_path = Path(imageio_ffmpeg.get_ffmpeg_exe())
+    except Exception:
+        return None
+
+    if binary_name.lower() == "ffmpeg":
+        return str(ffmpeg_path)
+
+    ffprobe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+    sibling = ffmpeg_path.with_name(ffprobe_name)
+    if sibling.exists():
+        return str(sibling)
+    return None
+
+
+def _resolve_repo_bundled_ffmpeg(binary_name: str) -> Optional[str]:
+    executable = binary_name if binary_name.lower().endswith(".exe") else f"{binary_name}.exe"
+    search_roots = [
+        Path(sys.executable).resolve().parent.parent,
+        _PROJECT_ROOT / "venv",
+        _PROJECT_ROOT / ".venv",
+        _PROJECT_ROOT / "backend" / ".venv",
+    ]
+
+    seen_roots: set[Path] = set()
+    for root in search_roots:
+        try:
+            resolved_root = root.resolve()
+        except OSError:
+            continue
+        if resolved_root in seen_roots or not resolved_root.exists():
+            continue
+        seen_roots.add(resolved_root)
+
+        site_packages_dirs = list(resolved_root.glob("Lib/site-packages")) + list(resolved_root.glob("lib/site-packages"))
+        for site_packages in site_packages_dirs:
+            binaries_dir = site_packages / "imageio_ffmpeg" / "binaries"
+            if not binaries_dir.exists():
+                continue
+            direct = binaries_dir / executable
+            if direct.exists():
+                return str(direct)
+            matches = sorted(binaries_dir.glob(f"{binary_name.lower()}-*"))
+            if matches:
+                return str(matches[0])
+    return None
+
+
+def _resolve_repo_wide_binary(binary_name: str) -> Optional[str]:
+    executable = binary_name if binary_name.lower().endswith(".exe") else f"{binary_name}.exe"
+    patterns = [executable]
+    if binary_name.lower() in {"ffmpeg", "ffprobe"}:
+        patterns.extend([f"{binary_name.lower()}-*.exe", f"{binary_name.lower()}-*"])
+
+    for pattern in patterns:
+        for candidate in _PROJECT_ROOT.rglob(pattern):
+            try:
+                if candidate.is_file():
+                    return str(candidate)
+            except OSError:
+                continue
+    return None
+
+
 def resolve_binary(binary_name: str, *, required: bool = False) -> Optional[str]:
     direct = shutil.which(binary_name) or shutil.which(f"{binary_name}.exe")
     if direct:
@@ -38,6 +111,18 @@ def resolve_binary(binary_name: str, *, required: bool = False) -> Optional[str]
 
     for candidate in _iter_candidate_paths(binary_name):
         return str(candidate)
+
+    imageio_path = _resolve_imageio_ffmpeg(binary_name)
+    if imageio_path:
+        return imageio_path
+
+    bundled_path = _resolve_repo_bundled_ffmpeg(binary_name)
+    if bundled_path:
+        return bundled_path
+
+    repo_wide_path = _resolve_repo_wide_binary(binary_name)
+    if repo_wide_path:
+        return repo_wide_path
 
     if required:
         raise FileNotFoundError(
@@ -56,4 +141,3 @@ def ensure_ffmpeg_on_path() -> None:
     path_value = os.environ.get("PATH", "")
     if ffmpeg_dir not in path_value.split(os.pathsep):
         os.environ["PATH"] = ffmpeg_dir + os.pathsep + path_value
-

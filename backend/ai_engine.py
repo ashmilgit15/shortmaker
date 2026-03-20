@@ -27,7 +27,8 @@ SHORTS_MAX_DURATION_SECONDS = 59.0
 # ========================================
 
 BASE_DIR = Path(__file__).parent.parent
-load_dotenv_file(BASE_DIR / ".env")
+CLERK_RUNTIME_KEYS = ("CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL")
+load_dotenv_file(BASE_DIR / ".env", override_keys=CLERK_RUNTIME_KEYS, clear_missing_keys=CLERK_RUNTIME_KEYS)
 CONFIG_FILE = BASE_DIR / ".env.json"
 
 # Default config
@@ -38,6 +39,7 @@ DEFAULT_CONFIG = {
     "youtube_client_id": "",
     "youtube_client_secret": "",
     "youtube_default_privacy": "private",
+    "youtube_accounts": {},
     "ai_enabled": False,
     "model": "gemini-2.5-flash",
 }

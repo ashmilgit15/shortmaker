@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@clerk/react": "latest",
+    "@clerk/react": "6.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

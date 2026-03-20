@@ -4,7 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from utils.env_loader import load_dotenv_file
+
 BASE_DIR = Path(__file__).resolve().parent
+CLERK_RUNTIME_KEYS = ("CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL")
 VENV_PYTHON_CANDIDATES = [
     BASE_DIR / "venv" / "Scripts" / "python.exe",
     BASE_DIR / ".venv" / "Scripts" / "python.exe",
@@ -55,6 +58,7 @@ def _ensure_project_python() -> None:
 
 def main() -> None:
     _ensure_project_python()
+    load_dotenv_file(BASE_DIR / ".env", override_keys=CLERK_RUNTIME_KEYS, clear_missing_keys=CLERK_RUNTIME_KEYS)
 
     import uvicorn
 
@@ -73,6 +77,10 @@ def main() -> None:
             ".venv/*",
             "outputs/*",
             "*.log",
+        ],
+        reload_includes=[
+            "*.py",
+            ".env",
         ],
     )
 
