@@ -97,8 +97,7 @@ def download_video(url: str, output_dir: str) -> dict:
     
     # Configure download options
     output_template = os.path.join(output_dir, '%(id)s.%(ext)s')
-    ffmpeg_path = resolve_binary("ffmpeg", required=False)
-    ffmpeg_location = str(Path(ffmpeg_path).parent) if ffmpeg_path else None
+    ffmpeg_path = resolve_binary("ffmpeg", required=True)
     
     ydl_opts = {
         # Prefer the best 1080p-or-below video + audio, then merge back to mp4.
@@ -111,8 +110,7 @@ def download_video(url: str, output_dir: str) -> dict:
         'remote_components': ['ejs:github'],
         **_build_ydl_common_opts(),
     }
-    if ffmpeg_location:
-        ydl_opts['ffmpeg_location'] = ffmpeg_location
+    ydl_opts['ffmpeg_location'] = ffmpeg_path
 
     last_error = None
     for attempt in range(1, YTDLP_OUTER_RETRY_ATTEMPTS + 1):

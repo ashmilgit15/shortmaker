@@ -17,7 +17,8 @@ from utils.env_loader import load_dotenv_file
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).parent.parent
-load_dotenv_file(BASE_DIR / ".env")
+CLERK_RUNTIME_KEYS = ("CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL")
+load_dotenv_file(BASE_DIR / ".env", override_keys=CLERK_RUNTIME_KEYS, clear_missing_keys=CLERK_RUNTIME_KEYS)
 
 FIRECRAWL_BASE_URL = os.environ.get("FIRECRAWL_BASE_URL", "https://api.firecrawl.dev").rstrip("/")
 FIRECRAWL_SEARCH_ENDPOINT = f"{FIRECRAWL_BASE_URL}/v2/search"

@@ -5,6 +5,54 @@
   max-width: 760px;
 }
 
+/* ── Role banners ── */
+.roleBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  padding: 1rem 1.15rem;
+  border-radius: var(--radius-md);
+}
+
+.roleBannerUser {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.18);
+}
+
+.roleBannerAdmin {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.18);
+}
+
+.roleBannerIcon {
+  font-size: 20px;
+  margin-top: 0.15rem;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.roleBannerBody {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
+.roleBannerTitle {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.2rem 0;
+}
+
+.roleBannerDesc {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
 /* ── YouTube Setup Alert ── */
 .youtubeSetupAlert {
   display: flex;
@@ -175,6 +223,37 @@
 .subIcon { font-size: 18px; color: var(--text-secondary); }
 .subDesc { font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem; line-height: 1.5; }
 
+.localNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  margin-top: 1rem;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-md);
+  background: rgba(66, 153, 225, 0.08);
+  border: 1px solid rgba(66, 153, 225, 0.16);
+}
+
+.localNoticeIcon {
+  font-size: 18px;
+  color: #4299e1;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.localNotice p {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.localScopeNote {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 /* ── Privacy row ── */
 .privacyRow {
   display: flex;
@@ -293,4 +372,5 @@
   .usageRow { grid-template-columns: repeat(3, 1fr); }
   .privacyRow { flex-direction: column; align-items: flex-start; }
   .privacySelect { max-width: 100%; width: 100%; }
+  .roleBannerBody { flex-direction: column; align-items: flex-start; }
 }

@@ -24,8 +24,6 @@ except ImportError:
     from .binaries import ensure_ffmpeg_on_path, resolve_binary
 
 ensure_ffmpeg_on_path()
-FFMPEG_PATH = resolve_binary("ffmpeg", required=True)
-FFPROBE_PATH = resolve_binary("ffprobe", required=True)
 
 TARGET_FPS = 30
 VIDEO_CRF = os.environ.get("SHORTMAKER_VIDEO_CRF", "16")
@@ -45,8 +43,12 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
     """
     Get video metadata using ffprobe.
     """
+    ffprobe_path = resolve_binary("ffprobe", required=False)
+    if not ffprobe_path:
+        return _get_video_info_with_cv2(video_path)
+
     cmd = [
-        FFPROBE_PATH,
+        ffprobe_path,
         "-v",
         "quiet",
         "-print_format",
@@ -88,6 +90,36 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
         "duration": duration,
         "fps": fps,
         "has_audio": has_audio,
+    }
+
+
+def _get_video_info_with_cv2(video_path: str) -> Dict[str, Any]:
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError("ffprobe is unavailable and OpenCV metadata fallback is not installed.") from exc
+
+    capture = cv2.VideoCapture(video_path)
+    if not capture.isOpened():
+        raise RuntimeError("Unable to open video for metadata extraction.")
+
+    try:
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920)
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080)
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 30.0)
+        if fps <= 0:
+            fps = 30.0
+        frame_count = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+        duration = frame_count / fps if frame_count > 0 and fps > 0 else 0.0
+    finally:
+        capture.release()
+
+    return {
+        "width": width,
+        "height": height,
+        "duration": duration,
+        "fps": fps,
+        "has_audio": True,
     }
 
 
@@ -512,8 +544,9 @@ def _run_ffmpeg_render(
     video_filter: str,
     has_audio: bool,
 ) -> subprocess.CompletedProcess:
+    ffmpeg_path = resolve_binary("ffmpeg", required=False) or resolve_binary("ffmpeg", required=True)
     cmd = [
-        FFMPEG_PATH,
+        ffmpeg_path,
         "-y",
         "-ss",
         f"{start_time:.3f}",

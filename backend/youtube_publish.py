@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 BASE_DIR = Path(__file__).parent.parent
-load_dotenv_file(BASE_DIR / ".env")
+CLERK_RUNTIME_KEYS = ("CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL")
+load_dotenv_file(BASE_DIR / ".env", override_keys=CLERK_RUNTIME_KEYS, clear_missing_keys=CLERK_RUNTIME_KEYS)
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
@@ -44,6 +45,7 @@ YOUTUBE_DEPENDENCY_HINT = (
     "Install YouTube publishing dependencies with "
     "`python -m pip install google-api-python-client google-auth-oauthlib`."
 )
+USER_YOUTUBE_ACCOUNTS_KEY = "youtube_accounts"
 
 
 def _load_config() -> dict:
@@ -63,12 +65,18 @@ def _normalize_privacy_status(value: Optional[str]) -> str:
     return normalized if normalized in VALID_PRIVACY_STATUSES else DEFAULT_YOUTUBE_PRIVACY
 
 
-def _client_id_from_config(config: dict) -> str:
-    return str(config.get("youtube_client_id") or os.environ.get("YOUTUBE_CLIENT_ID", "")).strip()
+def _client_id_from_config(config: dict, *, allow_env_fallback: bool = True) -> str:
+    value = str(config.get("youtube_client_id") or config.get("client_id") or "").strip()
+    if value or not allow_env_fallback:
+        return value
+    return str(os.environ.get("YOUTUBE_CLIENT_ID", "")).strip()
 
 
-def _client_secret_from_config(config: dict) -> str:
-    return str(config.get("youtube_client_secret") or os.environ.get("YOUTUBE_CLIENT_SECRET", "")).strip()
+def _client_secret_from_config(config: dict, *, allow_env_fallback: bool = True) -> str:
+    value = str(config.get("youtube_client_secret") or config.get("client_secret") or "").strip()
+    if value or not allow_env_fallback:
+        return value
+    return str(os.environ.get("YOUTUBE_CLIENT_SECRET", "")).strip()
 
 
 def _oauth_record_from_config(config: dict) -> dict:
@@ -93,14 +101,118 @@ def _build_code_challenge(code_verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
 
 
-def has_youtube_client_config() -> bool:
-    config = _load_config()
-    return bool(_client_id_from_config(config) and _client_secret_from_config(config))
+def _youtube_accounts_from_config(config: dict, *, create: bool = False) -> dict:
+    accounts = config.get(USER_YOUTUBE_ACCOUNTS_KEY)
+    if isinstance(accounts, dict):
+        return accounts
+    if not create:
+        return {}
+    accounts = {}
+    config[USER_YOUTUBE_ACCOUNTS_KEY] = accounts
+    return accounts
 
 
-def has_youtube_connection() -> bool:
+def _get_user_youtube_account(config: dict, user_id: Optional[str], *, create: bool = False) -> dict:
+    if not user_id:
+        return config
+    accounts = _youtube_accounts_from_config(config, create=create)
+    account = accounts.get(user_id)
+    if isinstance(account, dict):
+        return account
+    if not create:
+        return {}
+    account = {}
+    accounts[user_id] = account
+    return account
+
+
+def _save_user_youtube_account(config: dict, user_id: Optional[str], account: dict) -> None:
+    if not user_id:
+        return
+    accounts = _youtube_accounts_from_config(config, create=True)
+    cleaned = dict(account)
+    if cleaned:
+        accounts[user_id] = cleaned
+    else:
+        accounts.pop(user_id, None)
+    if not accounts:
+        config.pop(USER_YOUTUBE_ACCOUNTS_KEY, None)
+
+
+def _has_user_youtube_data(account: dict) -> bool:
+    oauth = _oauth_record_from_config(account)
+    return bool(
+        str(account.get("youtube_client_id") or account.get("client_id") or "").strip()
+        or str(account.get("youtube_client_secret") or account.get("client_secret") or "").strip()
+        or str(account.get("youtube_default_privacy") or account.get("default_privacy") or "").strip()
+        or str(account.get("youtube_oauth_state") or "").strip()
+        or str(account.get("youtube_oauth_code_verifier") or "").strip()
+        or str(oauth.get("refresh_token") or "").strip()
+        or str(oauth.get("authorized_at") or "").strip()
+    )
+
+
+def _user_has_personal_client_config(account: dict) -> bool:
+    return bool(
+        str(account.get("youtube_client_id") or account.get("client_id") or "").strip()
+        and str(account.get("youtube_client_secret") or account.get("client_secret") or "").strip()
+    )
+
+
+def _get_effective_youtube_record(config: dict, user_id: Optional[str]) -> tuple[dict, Optional[str]]:
+    if not user_id:
+        return config, None
+    account = _get_user_youtube_account(config, user_id, create=False)
+    if _has_user_youtube_data(account):
+        return account, user_id
+    return config, None
+
+
+def _build_youtube_status_from_record(record: dict, *, allow_env_fallback: bool) -> dict:
+    oauth = _oauth_record_from_config(record)
+    connected = bool(oauth.get("refresh_token"))
+    authorized_at = oauth.get("authorized_at")
+    if connected:
+        message = "YouTube is connected and ready for uploads."
+    elif oauth.get("authorized_at"):
+        message = (
+            "A previous YouTube authorization exists, but no usable refresh token is available. "
+            "Reconnect the account or set YOUTUBE_REFRESH_TOKEN."
+        )
+    else:
+        message = "Add a YouTube OAuth client and connect an account."
+    return {
+        "has_client_config": bool(
+            _client_id_from_config(record, allow_env_fallback=allow_env_fallback)
+            and _client_secret_from_config(record, allow_env_fallback=allow_env_fallback)
+        ),
+        "connected": connected,
+        "authorized_at": authorized_at,
+        "default_privacy_status": _normalize_privacy_status(
+            record.get("youtube_default_privacy")
+            or record.get("default_privacy")
+            or DEFAULT_YOUTUBE_PRIVACY
+        ),
+        "callback_path": _normalized_youtube_callback_path(),
+        "message": message,
+        "needs_reconnect": bool(oauth.get("authorized_at") and not connected),
+    }
+
+
+def has_youtube_client_config(user_id: Optional[str] = None) -> bool:
     config = _load_config()
-    oauth = _oauth_record_from_config(config)
+    record, scope_owner_id = _get_effective_youtube_record(config, user_id)
+    allow_env_fallback = scope_owner_id is None or not _user_has_personal_client_config(record)
+    return bool(
+        _client_id_from_config(record, allow_env_fallback=allow_env_fallback)
+        and _client_secret_from_config(record, allow_env_fallback=allow_env_fallback)
+    )
+
+
+def has_youtube_connection(user_id: Optional[str] = None) -> bool:
+    config = _load_config()
+    record = _get_user_youtube_account(config, user_id, create=False) if user_id else config
+    oauth = _oauth_record_from_config(record)
     return bool(oauth.get("refresh_token"))
 
 
@@ -114,31 +226,45 @@ def _require_google_dependency(module_name: str):
     return module
 
 
-def get_youtube_status() -> dict:
+def get_youtube_status(user_id: Optional[str] = None) -> dict:
     config = _load_config()
-    oauth = _oauth_record_from_config(config)
-    connected = bool(oauth.get("refresh_token"))
-    authorized_at = oauth.get("authorized_at") if connected else oauth.get("authorized_at")
-    if connected:
-        message = "YouTube is connected and ready for uploads."
-    elif oauth.get("authorized_at"):
-        message = (
-            "A previous YouTube authorization exists, but no usable refresh token is available. "
-            "Reconnect the account or set YOUTUBE_REFRESH_TOKEN."
+    if user_id:
+        personal_account = _get_user_youtube_account(config, user_id, create=False)
+        has_personal_config = _has_user_youtube_data(personal_account)
+        has_personal_client_config = _user_has_personal_client_config(personal_account)
+        shared_status = _build_youtube_status_from_record(config, allow_env_fallback=True)
+        effective_record = personal_account if has_personal_config else {}
+        status = _build_youtube_status_from_record(
+            effective_record,
+            allow_env_fallback=not has_personal_client_config,
+        )
+        status.update(
+            {
+                "scope": "user",
+                "scope_owner_id": user_id if has_personal_config else None,
+                "has_personal_config": has_personal_config,
+                "has_personal_client_config": has_personal_client_config,
+                "shared_status": shared_status,
+                "using_shared_fallback": not has_personal_config
+                and bool(shared_status["has_client_config"] or shared_status["connected"]),
+            }
         )
     else:
-        message = "Add a YouTube OAuth client and connect an account."
-    return {
-        "has_client_config": bool(_client_id_from_config(config) and _client_secret_from_config(config)),
-        "connected": connected,
-        "authorized_at": authorized_at,
-        "default_privacy_status": _normalize_privacy_status(
-            config.get("youtube_default_privacy", DEFAULT_YOUTUBE_PRIVACY)
-        ),
-        "callback_path": _normalized_youtube_callback_path(),
-        "message": message,
-        "needs_reconnect": bool(oauth.get("authorized_at") and not connected),
-    }
+        record, scope_owner_id = _get_effective_youtube_record(config, user_id)
+        status = _build_youtube_status_from_record(
+            record,
+            allow_env_fallback=scope_owner_id is None,
+        )
+        status.update(
+            {
+                "scope": "shared",
+                "scope_owner_id": None,
+                "has_personal_config": False,
+                "has_personal_client_config": False,
+                "using_shared_fallback": False,
+            }
+        )
+    return status
 
 
 def _normalized_youtube_callback_path() -> str:
@@ -150,12 +276,15 @@ def _normalized_youtube_callback_path() -> str:
     return DEFAULT_YOUTUBE_OAUTH_CALLBACK_PATH
 
 
-def clear_youtube_connection() -> None:
+def clear_youtube_connection(user_id: Optional[str] = None) -> None:
     config = _load_config()
-    config.pop("youtube_oauth", None)
-    config.pop("youtube_oauth_state", None)
-    config.pop("youtube_oauth_state_created_at", None)
-    config.pop("youtube_oauth_code_verifier", None)
+    target = _get_user_youtube_account(config, user_id, create=False) if user_id else config
+    target.pop("youtube_oauth", None)
+    target.pop("youtube_oauth_state", None)
+    target.pop("youtube_oauth_state_created_at", None)
+    target.pop("youtube_oauth_code_verifier", None)
+    if user_id:
+        _save_user_youtube_account(config, user_id, target)
     _save_config(config)
 
 
@@ -164,34 +293,43 @@ def save_youtube_settings(
     client_id: str = "",
     client_secret: str = "",
     default_privacy_status: str = DEFAULT_YOUTUBE_PRIVACY,
+    user_id: Optional[str] = None,
 ) -> dict:
     config = _load_config()
     normalized_privacy = _normalize_privacy_status(default_privacy_status)
-    effective_client_id = client_id.strip() or str(config.get("youtube_client_id") or "").strip()
-    effective_client_secret = client_secret.strip() or str(config.get("youtube_client_secret") or "").strip()
+    target = _get_user_youtube_account(config, user_id, create=bool(user_id)) if user_id else config
+    client_id_key = "client_id" if user_id else "youtube_client_id"
+    client_secret_key = "client_secret" if user_id else "youtube_client_secret"
+    privacy_key = "default_privacy" if user_id else "youtube_default_privacy"
+    effective_client_id = client_id.strip() or str(target.get(client_id_key) or "").strip()
+    effective_client_secret = client_secret.strip() or str(target.get(client_secret_key) or "").strip()
     client_changed = bool(
-        (client_id.strip() and client_id.strip() != str(config.get("youtube_client_id") or "").strip())
-        or (client_secret.strip() and client_secret.strip() != str(config.get("youtube_client_secret") or "").strip())
+        (client_id.strip() and client_id.strip() != str(target.get(client_id_key) or "").strip())
+        or (client_secret.strip() and client_secret.strip() != str(target.get(client_secret_key) or "").strip())
     )
 
-    config["youtube_client_id"] = effective_client_id
-    config["youtube_client_secret"] = effective_client_secret
-    config["youtube_default_privacy"] = normalized_privacy
+    target[client_id_key] = effective_client_id
+    target[client_secret_key] = effective_client_secret
+    target[privacy_key] = normalized_privacy
     if client_changed:
-        config.pop("youtube_oauth", None)
-        config.pop("youtube_oauth_state", None)
-        config.pop("youtube_oauth_state_created_at", None)
-        config.pop("youtube_oauth_code_verifier", None)
+        target.pop("youtube_oauth", None)
+        target.pop("youtube_oauth_state", None)
+        target.pop("youtube_oauth_state_created_at", None)
+        target.pop("youtube_oauth_code_verifier", None)
+    if user_id:
+        _save_user_youtube_account(config, user_id, target)
     _save_config(config)
-    return get_youtube_status()
+    return get_youtube_status(user_id=user_id)
 
 
-def build_authorization_url(redirect_uri: str) -> str:
+def build_authorization_url(redirect_uri: str, user_id: Optional[str] = None) -> str:
     Flow = _require_google_dependency("google_auth_oauthlib.flow").Flow
 
     config = _load_config()
-    client_id = _client_id_from_config(config)
-    client_secret = _client_secret_from_config(config)
+    target = _get_user_youtube_account(config, user_id, create=False) if user_id else config
+    allow_env_fallback = user_id is None or not _user_has_personal_client_config(target)
+    client_id = _client_id_from_config(target, allow_env_fallback=allow_env_fallback)
+    client_secret = _client_secret_from_config(target, allow_env_fallback=allow_env_fallback)
     if not client_id or not client_secret:
         raise ValueError(
             "YouTube OAuth client ID and client secret are required before connecting an account."
@@ -220,9 +358,13 @@ def build_authorization_url(redirect_uri: str) -> str:
         code_challenge_method="S256",
     )
 
-    config["youtube_oauth_state"] = state
-    config["youtube_oauth_state_created_at"] = datetime.now(timezone.utc).isoformat()
-    config["youtube_oauth_code_verifier"] = code_verifier
+    if user_id:
+        target = _get_user_youtube_account(config, user_id, create=True)
+    target["youtube_oauth_state"] = state
+    target["youtube_oauth_state_created_at"] = datetime.now(timezone.utc).isoformat()
+    target["youtube_oauth_code_verifier"] = code_verifier
+    if user_id:
+        _save_user_youtube_account(config, user_id, target)
     _save_config(config)
     return auth_url
 
@@ -239,6 +381,20 @@ def _build_client_config(client_id: str, client_secret: str, redirect_uri: str) 
     }
 
 
+def _find_oauth_target_for_state(config: dict, state: str) -> tuple[dict, Optional[str]]:
+    if state and state == _pending_state_from_config(config):
+        return config, None
+
+    accounts = _youtube_accounts_from_config(config, create=False)
+    for user_id, account in accounts.items():
+        if not isinstance(account, dict):
+            continue
+        if state and state == str(account.get("youtube_oauth_state") or "").strip():
+            return account, str(user_id)
+
+    raise ValueError("OAuth state verification failed. Start the YouTube connect flow again.")
+
+
 def complete_oauth_callback(code: str, state: str, redirect_uri: str) -> dict:
     Flow = _require_google_dependency("google_auth_oauthlib.flow").Flow
 
@@ -246,14 +402,13 @@ def complete_oauth_callback(code: str, state: str, redirect_uri: str) -> dict:
         raise ValueError("Missing OAuth authorization code.")
 
     config = _load_config()
-    client_id = _client_id_from_config(config)
-    client_secret = _client_secret_from_config(config)
-    expected_state = _pending_state_from_config(config)
-    code_verifier = _pending_code_verifier_from_config(config)
+    target, scope_user_id = _find_oauth_target_for_state(config, state)
+    allow_env_fallback = scope_user_id is None or not _user_has_personal_client_config(target)
+    client_id = _client_id_from_config(target, allow_env_fallback=allow_env_fallback)
+    client_secret = _client_secret_from_config(target, allow_env_fallback=allow_env_fallback)
+    code_verifier = _pending_code_verifier_from_config(target)
     if not client_id or not client_secret:
         raise ValueError("YouTube OAuth client settings are missing.")
-    if not expected_state or state != expected_state:
-        raise ValueError("OAuth state verification failed. Start the YouTube connect flow again.")
     if not code_verifier:
         raise ValueError("OAuth code verifier missing. Start the YouTube connect flow again.")
 
@@ -268,25 +423,29 @@ def complete_oauth_callback(code: str, state: str, redirect_uri: str) -> dict:
         flow.fetch_token(code=code, code_verifier=code_verifier)
 
     credentials = flow.credentials
-    refresh_token = credentials.refresh_token or _oauth_record_from_config(config).get("refresh_token")
+    refresh_token = credentials.refresh_token or _oauth_record_from_config(target).get("refresh_token")
     if not refresh_token:
         raise ValueError(
             "Google did not return a refresh token. Reconnect with consent enabled and ensure the OAuth client is configured correctly."
         )
 
-    config["youtube_oauth"] = {
+    target["youtube_oauth"] = {
         "refresh_token": refresh_token,
         "token_uri": credentials.token_uri or GOOGLE_TOKEN_URI,
         "scopes": list(credentials.scopes or [YOUTUBE_UPLOAD_SCOPE]),
         "authorized_at": datetime.now(timezone.utc).isoformat(),
     }
-    config.pop("youtube_oauth_state", None)
-    config.pop("youtube_oauth_state_created_at", None)
-    config.pop("youtube_oauth_code_verifier", None)
+    target.pop("youtube_oauth_state", None)
+    target.pop("youtube_oauth_state_created_at", None)
+    target.pop("youtube_oauth_code_verifier", None)
+    if scope_user_id:
+        _save_user_youtube_account(config, scope_user_id, target)
     _save_config(config)
     return {
         "connected": True,
-        "authorized_at": config["youtube_oauth"]["authorized_at"],
+        "authorized_at": target["youtube_oauth"]["authorized_at"],
+        "scope": "shared" if scope_user_id is None else "user",
+        "scope_owner_id": scope_user_id,
     }
 
 
@@ -377,13 +536,15 @@ def build_callback_html(success: bool, message: str, origin: str) -> str:
 </html>"""
 
 
-def _build_credentials():
+def _build_credentials(user_id: Optional[str] = None):
     Credentials = _require_google_dependency("google.oauth2.credentials").Credentials
 
     config = _load_config()
-    client_id = _client_id_from_config(config)
-    client_secret = _client_secret_from_config(config)
-    oauth = _oauth_record_from_config(config)
+    record = _get_user_youtube_account(config, user_id, create=False) if user_id else config
+    allow_env_fallback = not user_id or not _user_has_personal_client_config(record)
+    client_id = _client_id_from_config(record, allow_env_fallback=allow_env_fallback)
+    client_secret = _client_secret_from_config(record, allow_env_fallback=allow_env_fallback)
+    oauth = _oauth_record_from_config(record)
     refresh_token = str(oauth.get("refresh_token") or "").strip()
     if not client_id or not client_secret:
         raise ValueError("YouTube OAuth client settings are missing.")
@@ -447,6 +608,7 @@ def upload_short(
     tags: Optional[List[str]],
     privacy_status: Optional[str],
     category_id: str = DEFAULT_CATEGORY_ID,
+    user_id: Optional[str] = None,
 ) -> dict:
     build = _require_google_dependency("googleapiclient.discovery").build
     HttpError = _require_google_dependency("googleapiclient.errors").HttpError
@@ -456,7 +618,7 @@ def upload_short(
     if not resolved_path.exists():
         raise FileNotFoundError(f"Short not found: {resolved_path.name}")
 
-    credentials = _build_credentials()
+    credentials = _build_credentials(user_id=user_id)
     youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
 
     snippet = {

@@ -23,13 +23,14 @@ RUN python -m pip install --upgrade pip \
   && pip install --no-cache-dir -r requirements.txt
 
 COPY frontend/package.json frontend/package.json
+COPY frontend/package-lock.json frontend/package-lock.json
 COPY frontend/tsconfig.json frontend/tsconfig.json
 COPY frontend/tsconfig.app.json frontend/tsconfig.app.json
 COPY frontend/tsconfig.node.json frontend/tsconfig.node.json
 COPY frontend/vite.config.ts frontend/vite.config.ts
 COPY frontend/index.html frontend/index.html
 COPY frontend/src frontend/src
-RUN cd frontend && npm install
+RUN cd frontend && npm ci
 
 # Optional local Whisper fallback (disabled by default to keep deployment lightweight)
 ARG INSTALL_LOCAL_WHISPER=false

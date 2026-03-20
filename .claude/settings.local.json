@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd \"C:\\\\Users\\\\Ashmil P\\\\desktop\\\\shortmaker\\\\frontend\" && npm run build 2>&1)"
+      "Bash(cd \"C:\\\\Users\\\\Ashmil P\\\\desktop\\\\shortmaker\\\\frontend\" && npm run build 2>&1)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(curl -s -H \"Authorization: Bearer eyJhbGciOiJSUzI1NiIsImNhdCI6ImNsX0I3ZDRQRDExMUFBQSIsImtpZCI6Imluc18zQW93eG9ZUGRUTGUxVFpWSU55UzlDTW90clQiLCJ0eXAiOiJKV1QifQ.eyJhenAiOiJodHRwOi8vbG9jYWxob3N0OjUxNzMiLCJleHAiOjE3NzM5NDI3NjMsImZ2YSI6WzI5LC0xXSwiaWF0IjoxNzczOTQyNzAzLCJpc3MiOiJodHRwczovL3JhdGlvbmFsLWZveGhvdW5kLTEuY2xlcmsuYWNjb3VudHMuZGV2IiwibmJmIjoxNzczOTQyNjkzLCJzaWQiOiJzZXNzXzNCQW5xVlcxdTlRRjdTd2RHRWM0SHo0cEJveSIsInN0cyI6ImFjdGl2ZSIsInN1YiI6InVzZXJfM0JBbnFUeFdBZ0xwSmFpSWF0cHFHV21mazJzIiwidiI6Mn0.ntVQUBUGaO4QbKWEq2ZIEqx6g4uShgAeju4PkdFdlUa8XG7W2sIKpypQFiAPft_p5KLqXQuwN35oU-GT__4wJGqLT8CoQzypFraOY3mK5PQ0YfI8bLdXvfDYlbn95d9p8Y2F71BpgG6H-78be0E_Ei0z443y8Pd78ivsPWwnOGIMZK7mf9X8mtXPugsw8x9OEd4sDFoKMhQ63D2APWUhmimbQhvFOUytS94oxooY2zOh4sJBvK7SKI2dNr_dlvq7MGEfcqXgorffPlBrmysUK_mylv1Xfm8QwdyC6vUOFjn65SukbYmQCQsr0m6MLPob8LJPUs06E0mm5aVWfvdYfg\" http://127.0.0.1:8000/session)",
+      "Bash(curl:*)"
     ]
   }
 }

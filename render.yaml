@@ -32,6 +32,8 @@ services:
         value: "https://shortmaker.onrender.com/youtube/oauth/callback"
       - key: SHORTMAKER_ALLOWED_CALLBACK_HOSTS
         value: ""
+      - key: SHORTMAKER_ALLOW_PRIVATE_CALLBACKS
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY

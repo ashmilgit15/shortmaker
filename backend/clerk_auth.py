@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
 import jwt
+import logging
 from fastapi import Header, HTTPException
 
-JWKS_CACHE_TTL_SECONDS = 3600
+logger = logging.getLogger(__name__)
+
+JWKS_CACHE_TTL_SECONDS = 300
 _JWKS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 @dataclass
@@ -37,13 +44,72 @@ def _extract_bearer_token(authorization: Optional[str]) -> str:
     return token
 
 
+def _normalize_issuer(value: str) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def _read_env_key(path: Path, key: str) -> str:
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            raw_key, raw_value = line.split("=", 1)
+            if raw_key.strip() != key:
+                continue
+            value = raw_value.strip()
+            if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            return value
+    except OSError:
+        return ""
+    return ""
+
+
+def _derive_issuer_from_publishable_key(publishable_key: str) -> str:
+    raw = str(publishable_key or "").strip()
+    match = re.match(r"^pk_(?:test|live)_(.+)$", raw)
+    if not match:
+        return ""
+    payload = match.group(1)
+    padding = "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload + padding).decode("utf-8").rstrip("$")
+    except Exception:
+        return ""
+    return _normalize_issuer(f"https://{decoded}")
+
+
+def _local_frontend_issuer() -> str:
+    for path in (BASE_DIR / "frontend" / ".env.local", BASE_DIR / "frontend" / ".env"):
+        publishable_key = _read_env_key(path, "VITE_CLERK_PUBLISHABLE_KEY")
+        if publishable_key:
+            issuer = _derive_issuer_from_publishable_key(publishable_key)
+            if issuer:
+                return issuer
+    return ""
+
+
+def _allowed_issuers() -> set[str]:
+    issuers = set()
+    configured = _normalize_issuer(os.environ.get("CLERK_ISSUER", ""))
+    if configured:
+        issuers.add(configured)
+    local_frontend = _local_frontend_issuer()
+    if local_frontend:
+        issuers.add(local_frontend)
+    return issuers
+
+
 def _require_allowed_issuer(claimed_issuer: str) -> str:
-    configured = os.environ.get("CLERK_ISSUER", "").strip().rstrip("/")
-    normalized_claim = claimed_issuer.strip().rstrip("/")
+    configured = _normalize_issuer(os.environ.get("CLERK_ISSUER", ""))
+    normalized_claim = _normalize_issuer(claimed_issuer)
+    logger.debug("Issuer validation: claimed=%s configured=%s", normalized_claim, configured)
     if not normalized_claim:
         raise HTTPException(status_code=401, detail="Token issuer is missing.")
 
-    if not configured:
+    allowed_issuers = _allowed_issuers()
+    if not allowed_issuers:
         raise HTTPException(
             status_code=503,
             detail="CLERK_ISSUER is not configured on the server.",
@@ -52,14 +118,17 @@ def _require_allowed_issuer(claimed_issuer: str) -> str:
     parsed = urlparse(normalized_claim)
     if parsed.scheme != "https" or not parsed.netloc:
         raise HTTPException(status_code=401, detail="Token issuer is invalid.")
-    if normalized_claim != configured:
+    logger.debug("Issuer check: normalized_claim=%s allowed_issuers=%s", normalized_claim, allowed_issuers)
+    if normalized_claim not in allowed_issuers:
+        logger.warning("Issuer mismatch: claimed=%s allowed=%s", normalized_claim, allowed_issuers)
         raise HTTPException(status_code=401, detail="Token issuer does not match configured Clerk issuer.")
-    return configured
+    return normalized_claim if normalized_claim else configured
 
 
 def _get_jwks_url(issuer: str) -> str:
     configured = os.environ.get("CLERK_JWKS_URL", "").strip()
-    if configured:
+    configured_issuer = _normalize_issuer(os.environ.get("CLERK_ISSUER", ""))
+    if configured and configured_issuer == _normalize_issuer(issuer):
         return configured
     return f"{issuer}/.well-known/jwks.json"
 
@@ -90,7 +159,9 @@ def _get_signing_key(token: str, issuer: str) -> Any:
     if not key_id:
         raise HTTPException(status_code=401, detail="Token header is missing key id.")
 
-    jwks = _fetch_jwks(_get_jwks_url(issuer))
+    jwks_url = _get_jwks_url(issuer)
+    jwks = _fetch_jwks(jwks_url)
+    logger.debug("JWKS keys from %s: %s", jwks_url, [k.get("kid") for k in jwks.get("keys", [])])
     for key in jwks.get("keys", []):
         if str(key.get("kid")) == key_id:
             return jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
@@ -99,6 +170,8 @@ def _get_signing_key(token: str, issuer: str) -> Any:
 
 
 def verify_clerk_token(token: str) -> ClerkUser:
+    logger.warning("DEBUG env CLERK_ISSUER=%s", os.environ.get("CLERK_ISSUER", "NOT_SET"))
+    logger.warning("DEBUG env CLERK_AUDIENCE=%s", os.environ.get("CLERK_AUDIENCE", "NOT_SET"))
     try:
         unverified_claims = jwt.decode(
             token,
@@ -126,8 +199,10 @@ def verify_clerk_token(token: str) -> ClerkUser:
             issuer=issuer,
             audience=audience or None,
             options=decode_options,
+            leeway=30,
         )
     except jwt.InvalidTokenError as exc:
+        logger.warning("JWT decode failed: %s", exc)
         raise HTTPException(status_code=401, detail=f"Clerk token verification failed: {exc}") from exc
 
     user_id = str(claims.get("sub") or "").strip()

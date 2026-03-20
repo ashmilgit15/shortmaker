@@ -24,13 +24,14 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, File, Form, Header, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import threading
 import logging
 from urllib.parse import urlparse
 from utils.env_loader import load_dotenv_file
+from utils.binaries import resolve_binary
 from utils.secret_store import SHORTMAKER_SECRET_KEY_ENV, has_secret_storage_key
 from .clerk_auth import ClerkUser, require_clerk_user
 from .db import (
@@ -55,7 +56,8 @@ logger = logging.getLogger(__name__)
 # ========================================
 
 BASE_DIR = Path(__file__).parent.parent
-load_dotenv_file(BASE_DIR / ".env")
+CLERK_RUNTIME_KEYS = ("CLERK_ISSUER", "CLERK_AUDIENCE", "CLERK_JWKS_URL")
+load_dotenv_file(BASE_DIR / ".env", override_keys=CLERK_RUNTIME_KEYS, clear_missing_keys=CLERK_RUNTIME_KEYS)
 OUTPUT_DIR = BASE_DIR / "outputs"
 FRONTEND_DIR = BASE_DIR / "frontend"
 WEB_DIST_DIR = FRONTEND_DIR / "dist"
@@ -431,6 +433,12 @@ def _is_automation_api_user(user: Optional[ClerkUser]) -> bool:
     return bool(user and user.id == "api-automation")
 
 
+def _youtube_scope_user_id(user: ClerkUser) -> Optional[str]:
+    if _is_admin_console_user(user) or _is_admin_user(user):
+        return None
+    return user.id
+
+
 async def _require_app_user_or_api_key(
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
@@ -546,7 +554,24 @@ def _callback_host_allowed(hostname: str) -> bool:
 
 
 def _allow_private_callbacks() -> bool:
-    return not IS_PRODUCTION and _env_flag(ALLOW_PRIVATE_CALLBACKS_ENV)
+    return not IS_PRODUCTION and _env_flag(ALLOW_PRIVATE_CALLBACKS_ENV, default=True)
+
+
+def _resolve_callback_ips(parsed) -> set[str]:
+    hostname = parsed.hostname or ""
+    if _is_public_ip(hostname):
+        return {hostname}
+    try:
+        resolved_hosts = socket.getaddrinfo(
+            hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+        )
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=400, detail=f"callback_url host could not be resolved: {exc}") from exc
+    resolved_ips = {entry[4][0] for entry in resolved_hosts if entry and entry[4]}
+    if not resolved_ips:
+        raise HTTPException(status_code=400, detail="callback_url host could not be resolved")
+    return resolved_ips
 
 
 def _safe_filename(filename: str) -> str:
@@ -569,18 +594,12 @@ def _validate_callback_url(url: str):
         raise HTTPException(status_code=400, detail="callback_url must include a hostname")
     if parsed.username or parsed.password:
         raise HTTPException(status_code=400, detail="callback_url must not contain embedded credentials")
+    resolved_ips = _resolve_callback_ips(parsed)
+    if _allow_private_callbacks() and not all(_is_public_ip(ip) for ip in resolved_ips):
+        return
     if not _callback_host_allowed(parsed.hostname):
         raise HTTPException(status_code=400, detail="callback_url host is not allowlisted")
-    if _is_public_ip(parsed.hostname):
-        return
-    try:
-        resolved_hosts = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
-    except socket.gaierror as exc:
-        raise HTTPException(status_code=400, detail=f"callback_url host could not be resolved: {exc}") from exc
-    resolved_ips = {entry[4][0] for entry in resolved_hosts if entry and entry[4]}
-    if not resolved_ips:
-        raise HTTPException(status_code=400, detail="callback_url host could not be resolved")
-    if _allow_private_callbacks():
+    if all(_is_public_ip(ip) for ip in resolved_ips):
         return
     if not all(_is_public_ip(ip) for ip in resolved_ips):
         raise HTTPException(status_code=400, detail="callback_url must resolve only to public IP addresses")
@@ -815,6 +834,11 @@ async def _recover_interrupted_jobs_on_startup():
         logger.warning("CLERK_ISSUER is not configured. Authenticated routes will reject requests.")
     if not _split_csv_env("SHORTMAKER_ADMIN_USER_IDS") and not _split_csv_env("SHORTMAKER_ADMIN_EMAILS"):
         logger.warning("No admin allowlist configured. Admin routes are disabled until SHORTMAKER_ADMIN_USER_IDS or SHORTMAKER_ADMIN_EMAILS is set.")
+    ffmpeg_path = resolve_binary("ffmpeg", required=False)
+    if ffmpeg_path:
+        logger.info("Resolved FFmpeg binary: %s", ffmpeg_path)
+    else:
+        logger.warning("FFmpeg binary not resolved at startup. Video processing will fail until it is available.")
     init_database()
     recover_incomplete_jobs()
 
@@ -1520,7 +1544,25 @@ async def get_recent_jobs(request: Request, user: ClerkUser = Depends(_require_a
 
 @app.get("/result/{job_id}")
 async def get_result(job_id: str, request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)):
-    return _get_completed_result_payload(job_id, _resolve_public_base_url(request), user=user)
+    public_base_url = _resolve_public_base_url(request)
+    status = load_job_status(job_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_ownership(job_id, status, user)
+
+    if status.get("stage") != "complete":
+        payload = _build_result_payload(job_id, status, public_base_url=public_base_url)
+        payload["success"] = False
+        payload["complete"] = False
+        payload["ready"] = False
+        return JSONResponse(status_code=202, content=payload)
+
+    payload = _build_result_payload(job_id, status, public_base_url=public_base_url)
+    payload["success"] = True
+    payload["complete"] = True
+    payload["ready"] = True
+    payload["highlights_info"] = _build_highlights_info(status)
+    return payload
 
 
 @app.get("/shorts/{filename}")
@@ -1890,13 +1932,13 @@ async def auto_process_trend(request: TrendAutoProcessRequest, user: ClerkUser =
 async def get_youtube_publish_status(request: Request, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import get_youtube_status
 
-    status = get_youtube_status()
+    status = get_youtube_status(user_id=_youtube_scope_user_id(user))
     status["expected_redirect_uri"] = _build_youtube_redirect_uri(request)
     return status
 
 
 @app.post("/youtube/config")
-async def set_youtube_publish_config(request: YouTubeConfigRequest, admin: ClerkUser = Depends(_require_admin_user)):
+async def set_youtube_publish_config(request: YouTubeConfigRequest, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import save_youtube_settings
 
     _assert_secret_storage_ready(request.youtube_client_id, request.youtube_client_secret)
@@ -1904,6 +1946,7 @@ async def set_youtube_publish_config(request: YouTubeConfigRequest, admin: Clerk
         client_id=request.youtube_client_id,
         client_secret=request.youtube_client_secret,
         default_privacy_status=request.youtube_default_privacy,
+        user_id=_youtube_scope_user_id(user),
     )
     return {
         "success": True,
@@ -1913,12 +1956,12 @@ async def set_youtube_publish_config(request: YouTubeConfigRequest, admin: Clerk
 
 
 @app.post("/youtube/auth/start")
-async def start_youtube_auth(request: Request, user: ClerkUser = Depends(_require_admin_user)):
+async def start_youtube_auth(request: Request, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import build_authorization_url
 
     redirect_uri = _build_youtube_redirect_uri(request)
     try:
-        auth_url = build_authorization_url(redirect_uri)
+        auth_url = build_authorization_url(redirect_uri, user_id=_youtube_scope_user_id(user))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
@@ -1969,10 +2012,10 @@ async def youtube_oauth_callback(
 
 
 @app.delete("/youtube/connection")
-async def disconnect_youtube(user: ClerkUser = Depends(_require_admin_user)):
+async def disconnect_youtube(user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import clear_youtube_connection
 
-    clear_youtube_connection()
+    clear_youtube_connection(user_id=_youtube_scope_user_id(user))
     return {"success": True, "message": "Disconnected YouTube account."}
 
 
@@ -2000,6 +2043,7 @@ async def upload_short_to_youtube(
             description=payload.description,
             tags=payload.tags,
             privacy_status=payload.privacy_status,
+            user_id=_youtube_scope_user_id(user),
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -2054,6 +2098,7 @@ async def upload_shorts_to_youtube(
                 description=item.description,
                 tags=item.tags,
                 privacy_status=item.privacy_status,
+                user_id=_youtube_scope_user_id(user),
             )
             uploads.append({
                 "success": True,
@@ -2237,7 +2282,9 @@ async def admin_get_capabilities():
 # ========================================
 
 if WEB_DIST_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(WEB_DIST_DIR / "assets")), name="frontend-assets")
+    web_assets_dir = WEB_DIST_DIR / "assets"
+    if web_assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(web_assets_dir)), name="frontend-assets")
     
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
