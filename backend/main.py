@@ -1906,9 +1906,15 @@ async def auto_process_trend(request: TrendAutoProcessRequest, user: ClerkUser =
 async def get_youtube_publish_status(request: Request, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import get_youtube_status
 
-    status = get_youtube_status(user_id=_youtube_scope_user_id(user))
-    status["expected_redirect_uri"] = _build_youtube_redirect_uri(request)
-    return status
+    try:
+        status = get_youtube_status(user_id=_youtube_scope_user_id(user))
+        status["expected_redirect_uri"] = _build_youtube_redirect_uri(request)
+        return status
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to build YouTube status for user %s", getattr(user, "id", None))
+        raise HTTPException(status_code=500, detail="Failed to load YouTube status.") from exc
 
 
 @app.post("/youtube/config")
@@ -2106,7 +2112,11 @@ async def upload_shorts_to_youtube(
 @app.get("/capabilities")
 async def get_capabilities():
     """Expose product capabilities for dynamic frontends."""
-    return _build_capabilities_payload(require_api_key=_is_api_auth_required())
+    try:
+        return _build_capabilities_payload(require_api_key=_is_api_auth_required())
+    except Exception as exc:
+        logger.exception("Failed to build capabilities payload.")
+        raise HTTPException(status_code=500, detail="Failed to load capabilities.") from exc
 
 
 # ========================================
