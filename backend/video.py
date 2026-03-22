@@ -17,6 +17,11 @@ YTDLP_FORMAT = os.environ.get(
     "bv*[height<=1080]+ba/"
     "b[height<=1080][ext=mp4]/b[height<=1080]/best",
 )
+YTDLP_FALLBACK_FORMATS = [
+    "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]",
+    "bv*+ba/b",
+    "best",
+]
 YTDLP_RETRIES = int(os.environ.get("SHORTMAKER_YTDLP_RETRIES", "6"))
 YTDLP_FRAGMENT_RETRIES = int(os.environ.get("SHORTMAKER_YTDLP_FRAGMENT_RETRIES", "8"))
 YTDLP_EXTRACTOR_RETRIES = int(os.environ.get("SHORTMAKER_YTDLP_EXTRACTOR_RETRIES", "3"))
@@ -80,6 +85,15 @@ def _resolve_cookie_file() -> str | None:
     return str(cookie_path)
 
 
+def _build_format_candidates() -> list[str]:
+    candidates: list[str] = []
+    for candidate in [YTDLP_FORMAT, *YTDLP_FALLBACK_FORMATS]:
+        normalized = str(candidate or "").strip()
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
+
+
 def get_video_info(url: str) -> dict:
     """
     Get video metadata without downloading.
@@ -135,8 +149,6 @@ def download_video(url: str, output_dir: str) -> dict:
     ffmpeg_location = str(Path(ffmpeg_path).parent) if ffmpeg_path else None
     
     ydl_opts = {
-        # Prefer the best 1080p-or-below video + audio, then merge back to mp4.
-        'format': YTDLP_FORMAT,
         'outtmpl': output_template,
         'merge_output_format': 'mp4',
         'noplaylist': True,
@@ -152,29 +164,43 @@ def download_video(url: str, output_dir: str) -> dict:
         ydl_opts['cookiefile'] = cookie_file
 
     last_error = None
-    for attempt in range(1, YTDLP_OUTER_RETRY_ATTEMPTS + 1):
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            last_error = None
+    for format_index, format_selector in enumerate(_build_format_candidates(), start=1):
+        candidate_opts = {
+            **ydl_opts,
+            # Prefer the best 1080p-or-below video + audio, then broaden if unavailable.
+            'format': format_selector,
+        }
+        for attempt in range(1, YTDLP_OUTER_RETRY_ATTEMPTS + 1):
+            try:
+                with yt_dlp.YoutubeDL(candidate_opts) as ydl:
+                    ydl.download([url])
+                last_error = None
+                break
+            except yt_dlp.utils.DownloadError as exc:
+                last_error = exc
+                message = str(exc)
+                if "Sign in to confirm you’re not a bot" in message or "Sign in to confirm you're not a bot" in message:
+                    raise RuntimeError(
+                        "YouTube blocked this download. Configure Netscape-format YouTube cookies via "
+                        f"{YTDLP_COOKIE_FILE_ENV}, {YTDLP_COOKIE_TEXT_ENV}, or {YTDLP_COOKIE_BASE64_ENV}."
+                    ) from exc
+                if "Requested format is not available" in message:
+                    print(
+                        f"yt-dlp format '{format_selector}' unavailable for {info['id']}; "
+                        f"trying fallback {format_index + 1}/{len(_build_format_candidates())}."
+                    )
+                    break
+                if attempt >= YTDLP_OUTER_RETRY_ATTEMPTS:
+                    raise
+                _clear_partial_downloads(output_dir, info['id'])
+                sleep_seconds = YTDLP_RETRY_BACKOFF_SECONDS * attempt
+                print(
+                    f"yt-dlp download attempt {attempt}/{YTDLP_OUTER_RETRY_ATTEMPTS} failed; "
+                    f"retrying in {sleep_seconds:.1f}s: {exc}"
+                )
+                time.sleep(sleep_seconds)
+        if last_error is None:
             break
-        except yt_dlp.utils.DownloadError as exc:
-            last_error = exc
-            message = str(exc)
-            if "Sign in to confirm you’re not a bot" in message or "Sign in to confirm you're not a bot" in message:
-                raise RuntimeError(
-                    "YouTube blocked this download. Configure Netscape-format YouTube cookies via "
-                    f"{YTDLP_COOKIE_FILE_ENV}, {YTDLP_COOKIE_TEXT_ENV}, or {YTDLP_COOKIE_BASE64_ENV}."
-                ) from exc
-            if attempt >= YTDLP_OUTER_RETRY_ATTEMPTS:
-                raise
-            _clear_partial_downloads(output_dir, info['id'])
-            sleep_seconds = YTDLP_RETRY_BACKOFF_SECONDS * attempt
-            print(
-                f"yt-dlp download attempt {attempt}/{YTDLP_OUTER_RETRY_ATTEMPTS} failed; "
-                f"retrying in {sleep_seconds:.1f}s: {exc}"
-            )
-            time.sleep(sleep_seconds)
 
     if last_error is not None:
         raise last_error
