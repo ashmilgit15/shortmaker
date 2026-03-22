@@ -23,6 +23,17 @@ const CLERK_ISSUER_MISMATCH_MESSAGE = 'Session is tied to a different Clerk inst
 const ADMIN_ROUTE_PREFIX = '/ashmil2010';
 const CLERK_ISSUER_SETTLE_MS = 15_000;
 
+interface AppProps {
+  adminStandalone?: boolean;
+}
+
+interface AppAuthContext {
+  isLoaded: boolean;
+  isSignedIn: boolean;
+  getToken: () => Promise<string | null>;
+  sessionClaims: Record<string, unknown> | null;
+}
+
 function normalizeIssuer(value: string): string {
   return String(value || '').trim().replace(/\/+$/, '');
 }
@@ -55,9 +66,19 @@ function normalizeJob(job: Partial<Job> & { job_id?: string }): Job {
   };
 }
 
-export default function App() {
-  const { isLoaded, isSignedIn } = useUser();
-  const { getToken, sessionClaims } = useAuth();
+function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boolean; auth: AppAuthContext }) {
+  const { isLoaded, isSignedIn, getToken, sessionClaims } = auth;
+  const isAdminConsoleRoute =
+    typeof window !== 'undefined' && window.location.pathname.startsWith(ADMIN_ROUTE_PREFIX);
+
+  if (adminStandalone && !isAdminConsoleRoute) {
+    return null;
+  }
+
+  if (!adminStandalone && isAdminConsoleRoute) {
+    return null;
+  }
+
   const noticeTimeoutRef = useRef<number | null>(null);
   const responseWarningsRef = useRef<Set<string>>(new Set());
   const apiUnavailableUntilRef = useRef(0);
@@ -66,7 +87,6 @@ export default function App() {
   const issuerMismatchDetectedAtRef = useRef<number | null>(null);
   const protectedPollInFlightRef = useRef(false);
   const authFailureNoticeRef = useRef(false);
-  const isAdminConsoleRoute = typeof window !== 'undefined' && window.location.pathname.startsWith(ADMIN_ROUTE_PREFIX);
   const hasWorkspaceAccess = isAdminConsoleRoute || isSignedIn;
   const expectedClerkIssuer = deriveIssuerFromPublishableKey(CLERK_PUBLISHABLE_KEY);
   const sessionIssuer = normalizeIssuer(String(sessionClaims?.iss || ''));
@@ -805,4 +825,32 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function AppWithClerk() {
+  const { isLoaded, isSignedIn } = useUser();
+  const { getToken, sessionClaims } = useAuth();
+
+  const auth = {
+    isLoaded,
+    isSignedIn: Boolean(isSignedIn),
+    getToken: async () => (await getToken()) || null,
+    sessionClaims: (sessionClaims as Record<string, unknown> | null) || null,
+  };
+
+  return <AppContent auth={auth} />;
+}
+
+export default function App({ adminStandalone = false }: AppProps) {
+  if (adminStandalone) {
+    const adminAuth: AppAuthContext = {
+      isLoaded: true,
+      isSignedIn: false,
+      getToken: async () => null,
+      sessionClaims: null,
+    };
+    return <AppContent adminStandalone auth={adminAuth} />;
+  }
+
+  return <AppWithClerk />;
 }

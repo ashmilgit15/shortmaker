@@ -2,7 +2,9 @@
 video.py - YouTube video downloader using yt-dlp
 """
 
+import base64
 import os
+import tempfile
 import time
 import yt_dlp
 from pathlib import Path
@@ -22,6 +24,9 @@ YTDLP_SOCKET_TIMEOUT = int(os.environ.get("SHORTMAKER_YTDLP_SOCKET_TIMEOUT", "30
 YTDLP_HTTP_CHUNK_SIZE = int(os.environ.get("SHORTMAKER_YTDLP_HTTP_CHUNK_SIZE", str(10 * 1024 * 1024)))
 YTDLP_OUTER_RETRY_ATTEMPTS = int(os.environ.get("SHORTMAKER_YTDLP_OUTER_RETRY_ATTEMPTS", "3"))
 YTDLP_RETRY_BACKOFF_SECONDS = float(os.environ.get("SHORTMAKER_YTDLP_RETRY_BACKOFF_SECONDS", "2.5"))
+YTDLP_COOKIE_FILE_ENV = "SHORTMAKER_YTDLP_COOKIES_FILE"
+YTDLP_COOKIE_TEXT_ENV = "SHORTMAKER_YTDLP_COOKIES"
+YTDLP_COOKIE_BASE64_ENV = "SHORTMAKER_YTDLP_COOKIES_BASE64"
 
 ensure_ffmpeg_on_path()
 
@@ -49,6 +54,32 @@ def _clear_partial_downloads(output_dir: str, video_id: str) -> None:
                 pass
 
 
+def _resolve_cookie_file() -> str | None:
+    configured_path = os.environ.get(YTDLP_COOKIE_FILE_ENV, "").strip()
+    if configured_path and Path(configured_path).exists():
+        return configured_path
+
+    cookie_text = os.environ.get(YTDLP_COOKIE_TEXT_ENV, "").strip()
+    cookie_base64 = os.environ.get(YTDLP_COOKIE_BASE64_ENV, "").strip()
+
+    if not cookie_text and cookie_base64:
+        try:
+            cookie_text = base64.b64decode(cookie_base64).decode("utf-8")
+        except Exception as exc:
+            raise RuntimeError(
+                f"{YTDLP_COOKIE_BASE64_ENV} is not valid base64-encoded Netscape cookies text."
+            ) from exc
+
+    if not cookie_text:
+        return None
+
+    runtime_dir = Path(tempfile.gettempdir()) / "shortmaker"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    cookie_path = runtime_dir / "yt-dlp-cookies.txt"
+    cookie_path.write_text(cookie_text, encoding="utf-8")
+    return str(cookie_path)
+
+
 def get_video_info(url: str) -> dict:
     """
     Get video metadata without downloading.
@@ -60,6 +91,9 @@ def get_video_info(url: str) -> dict:
         'extract_flat': False,
         **_build_ydl_common_opts(),
     }
+    cookie_file = _resolve_cookie_file()
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -113,6 +147,9 @@ def download_video(url: str, output_dir: str) -> dict:
     }
     if ffmpeg_location:
         ydl_opts['ffmpeg_location'] = ffmpeg_location
+    cookie_file = _resolve_cookie_file()
+    if cookie_file:
+        ydl_opts['cookiefile'] = cookie_file
 
     last_error = None
     for attempt in range(1, YTDLP_OUTER_RETRY_ATTEMPTS + 1):
@@ -123,6 +160,12 @@ def download_video(url: str, output_dir: str) -> dict:
             break
         except yt_dlp.utils.DownloadError as exc:
             last_error = exc
+            message = str(exc)
+            if "Sign in to confirm you’re not a bot" in message or "Sign in to confirm you're not a bot" in message:
+                raise RuntimeError(
+                    "YouTube blocked this download. Configure Netscape-format YouTube cookies via "
+                    f"{YTDLP_COOKIE_FILE_ENV}, {YTDLP_COOKIE_TEXT_ENV}, or {YTDLP_COOKIE_BASE64_ENV}."
+                ) from exc
             if attempt >= YTDLP_OUTER_RETRY_ATTEMPTS:
                 raise
             _clear_partial_downloads(output_dir, info['id'])
