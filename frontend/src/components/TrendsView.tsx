@@ -8,18 +8,24 @@ interface TrendsViewProps {
   apiFetch: (path: string, opts?: RequestInit) => Promise<Response | null>;
   showNotice: (type: 'success' | 'error' | 'info', msg: string) => void;
   onProcessUrl: (url: string) => Promise<boolean>;
+  authReady: boolean;
+  authMessage?: string | null;
 }
 
-export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: TrendsViewProps) {
-  const [topic, setTopic]           = useState('');
-  const [location, setLocation]     = useState('India');
-  const [searching, setSearching]   = useState(false);
-  const [results, setResults]       = useState<TrendCandidate[] | null>(null);
-  const [processing, setProcessing] = useState<string | null>(null); // URL being processed
+export default function TrendsView({ apiFetch, showNotice, onProcessUrl, authReady, authMessage }: TrendsViewProps) {
+  const [topic, setTopic] = useState('');
+  const [location, setLocation] = useState('India');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<TrendCandidate[] | null>(null);
+  const [processing, setProcessing] = useState<string | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!topic.trim() || searching) return;
+    if (!authReady) {
+      showNotice('info', authMessage || 'Finishing sign-in. Wait for your session to complete before using trends.');
+      return;
+    }
     setSearching(true);
     try {
       const res = await apiFetch('/trends/discover', {
@@ -44,6 +50,10 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
 
   const handleAutoProcess = async () => {
     if (!topic.trim() || searching) return;
+    if (!authReady) {
+      showNotice('info', authMessage || 'Finishing sign-in. Wait for your session to complete before using trends.');
+      return;
+    }
     setSearching(true);
     try {
       const res = await apiFetch('/trends/auto-process', {
@@ -65,6 +75,10 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
   };
 
   const handleProcess = async (url: string) => {
+    if (!authReady) {
+      showNotice('info', authMessage || 'Finishing sign-in. Wait for your session to complete before starting processing.');
+      return;
+    }
     setProcessing(url);
     try {
       const started = await onProcessUrl(url);
@@ -78,7 +92,6 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
 
   return (
     <div className={`${styles.view} animate-in`}>
-      {/* ── Search card ── */}
       <div className={`card ${styles.searchCard}`}>
         <div className={styles.searchHeader}>
           <div className={styles.searchIcon}>
@@ -99,7 +112,7 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               className={styles.searchInput}
-              disabled={searching}
+              disabled={searching || !authReady}
               required
             />
           </div>
@@ -110,7 +123,7 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
               <select
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                disabled={searching}
+                disabled={searching || !authReady}
                 className={styles.locationSelect}
               >
                 {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
@@ -120,7 +133,7 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
             <button
               type="submit"
               className={`btn btn-secondary ${styles.searchBtn}`}
-              disabled={searching || !topic.trim()}
+              disabled={searching || !topic.trim() || !authReady}
             >
               {searching ? (
                 <><span className={`material-symbols-outlined ${styles.spinning}`}>autorenew</span>Searching…</>
@@ -133,7 +146,7 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
               type="button"
               className={`btn btn-primary ${styles.autoBtn}`}
               onClick={handleAutoProcess}
-              disabled={searching || !topic.trim()}
+              disabled={searching || !topic.trim() || !authReady}
               title="Auto-pick top trending video and start processing"
             >
               <span className="material-symbols-outlined">bolt</span>
@@ -141,9 +154,15 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
             </button>
           </div>
         </form>
+
+        {!authReady && (
+          <div className="empty-state">
+            <span className="material-symbols-outlined">lock_clock</span>
+            <p>{authMessage || 'Finishing sign-in. Trends will unlock after the backend session is verified.'}</p>
+          </div>
+        )}
       </div>
 
-      {/* ── Results ── */}
       {results !== null && (
         <div className={styles.resultsSection}>
           {results.length === 0 ? (
@@ -211,7 +230,6 @@ export default function TrendsView({ apiFetch, showNotice, onProcessUrl }: Trend
         </div>
       )}
 
-      {/* ── Empty prompt ── */}
       {results === null && (
         <div className={styles.emptyHint}>
           <span className={`material-symbols-outlined ${styles.emptyHintIcon}`}>tips_and_updates</span>

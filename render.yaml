@@ -23,13 +23,13 @@ services:
       - key: SHORTMAKER_ADMIN_EMAILS
         sync: false
       - key: SHORTMAKER_ALLOWED_ORIGINS
-        value: "https://shortmaker.onrender.com"
+        value: "https://shortmaker-2.onrender.com"
       - key: SHORTMAKER_ALLOWED_HOSTS
-        value: "shortmaker.onrender.com"
+        value: "shortmaker-2.onrender.com"
       - key: SHORTMAKER_YOUTUBE_OAUTH_BASE_URL
-        value: "https://shortmaker.onrender.com"
+        value: "https://shortmaker-2.onrender.com"
       - key: SHORTMAKER_YOUTUBE_OAUTH_CALLBACK_URI
-        value: "https://shortmaker.onrender.com/youtube/oauth/callback"
+        value: "https://shortmaker-2.onrender.com/youtube/oauth/callback"
       - key: SHORTMAKER_ALLOWED_CALLBACK_HOSTS
         value: ""
       - key: GEMINI_API_KEY

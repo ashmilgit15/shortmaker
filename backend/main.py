@@ -405,6 +405,12 @@ def _is_admin_user(user: ClerkUser) -> bool:
     return False
 
 
+def _youtube_scope_user_id(user: ClerkUser) -> Optional[str]:
+    if _is_admin_console_user(user) or _is_admin_user(user):
+        return None
+    return user.id
+
+
 async def _require_admin_user(user: ClerkUser = Depends(_require_app_user)) -> ClerkUser:
     if _is_admin_user(user):
         return user
@@ -1900,13 +1906,13 @@ async def auto_process_trend(request: TrendAutoProcessRequest, user: ClerkUser =
 async def get_youtube_publish_status(request: Request, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import get_youtube_status
 
-    status = get_youtube_status()
+    status = get_youtube_status(user_id=_youtube_scope_user_id(user))
     status["expected_redirect_uri"] = _build_youtube_redirect_uri(request)
     return status
 
 
 @app.post("/youtube/config")
-async def set_youtube_publish_config(request: YouTubeConfigRequest, admin: ClerkUser = Depends(_require_admin_user)):
+async def set_youtube_publish_config(request: YouTubeConfigRequest, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import save_youtube_settings
 
     _assert_secret_storage_ready(request.youtube_client_id, request.youtube_client_secret)
@@ -1914,6 +1920,7 @@ async def set_youtube_publish_config(request: YouTubeConfigRequest, admin: Clerk
         client_id=request.youtube_client_id,
         client_secret=request.youtube_client_secret,
         default_privacy_status=request.youtube_default_privacy,
+        user_id=_youtube_scope_user_id(user),
     )
     return {
         "success": True,
@@ -1923,12 +1930,12 @@ async def set_youtube_publish_config(request: YouTubeConfigRequest, admin: Clerk
 
 
 @app.post("/youtube/auth/start")
-async def start_youtube_auth(request: Request, user: ClerkUser = Depends(_require_admin_user)):
+async def start_youtube_auth(request: Request, user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import build_authorization_url
 
     redirect_uri = _build_youtube_redirect_uri(request)
     try:
-        auth_url = build_authorization_url(redirect_uri)
+        auth_url = build_authorization_url(redirect_uri, user_id=_youtube_scope_user_id(user))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
@@ -1979,10 +1986,10 @@ async def youtube_oauth_callback(
 
 
 @app.delete("/youtube/connection")
-async def disconnect_youtube(user: ClerkUser = Depends(_require_admin_user)):
+async def disconnect_youtube(user: ClerkUser = Depends(_require_app_user)):
     from .youtube_publish import clear_youtube_connection
 
-    clear_youtube_connection()
+    clear_youtube_connection(user_id=_youtube_scope_user_id(user))
     return {"success": True, "message": "Disconnected YouTube account."}
 
 
@@ -2010,6 +2017,7 @@ async def upload_short_to_youtube(
             description=payload.description,
             tags=payload.tags,
             privacy_status=payload.privacy_status,
+            user_id=_youtube_scope_user_id(user),
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -2064,6 +2072,7 @@ async def upload_shorts_to_youtube(
                 description=item.description,
                 tags=item.tags,
                 privacy_status=item.privacy_status,
+                user_id=_youtube_scope_user_id(user),
             )
             uploads.append({
                 "success": True,
