@@ -19,9 +19,10 @@ interface MobileNavProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   hasAdmin: boolean;
+  showUser?: boolean;
 }
 
-export default function MobileNav({ activeTab, setActiveTab, hasAdmin }: MobileNavProps) {
+export default function MobileNav({ activeTab, setActiveTab, hasAdmin, showUser = true }: MobileNavProps) {
   // Only admin features are restricted; Settings is now accessible to all
   const items = NAV_ITEMS;
 
@@ -39,9 +40,11 @@ export default function MobileNav({ activeTab, setActiveTab, hasAdmin }: MobileN
         </button>
       ))}
 
-      <div className={styles.userTab}>
-        <UserButton />
-      </div>
+      {showUser && (
+        <div className={styles.userTab}>
+          <UserButton />
+        </div>
+      )}
     </nav>
   );
 }

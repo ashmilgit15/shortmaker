@@ -67,6 +67,7 @@ export default function App() {
   const protectedPollInFlightRef = useRef(false);
   const authFailureNoticeRef = useRef(false);
   const isAdminConsoleRoute = typeof window !== 'undefined' && window.location.pathname.startsWith(ADMIN_ROUTE_PREFIX);
+  const hasWorkspaceAccess = isAdminConsoleRoute || isSignedIn;
   const expectedClerkIssuer = deriveIssuerFromPublishableKey(CLERK_PUBLISHABLE_KEY);
   const sessionIssuer = normalizeIssuer(String(sessionClaims?.iss || ''));
   const frontendIssuerMismatch = Boolean(expectedClerkIssuer && sessionIssuer && sessionIssuer !== expectedClerkIssuer);
@@ -295,7 +296,7 @@ export default function App() {
   }, [authenticatedFetch, handleProtectedAuthFailure]);
 
   const fetchData = useCallback(async () => {
-    if (!isLoaded || !isSignedIn) return;
+    if (!isLoaded || !hasWorkspaceAccess) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     if (Date.now() < apiUnavailableUntilRef.current) return;
     if (protectedPollInFlightRef.current) return;
@@ -384,10 +385,10 @@ export default function App() {
     } finally {
       protectedPollInFlightRef.current = false;
     }
-  }, [authenticatedFetch, authenticatedRootFetch, frontendIssuerMismatch, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isLoaded, isSignedIn, publicFetch, readResponseBody, showNotice]);
+  }, [authenticatedFetch, authenticatedRootFetch, frontendIssuerMismatch, getBearerToken, handleProtectedAuthFailure, hasWorkspaceAccess, isAdminConsoleRoute, isLoaded, publicFetch, readResponseBody, showNotice]);
 
   useEffect(() => {
-    if (!isSignedIn) {
+    if (!hasWorkspaceAccess) {
       setBackendSessionVerified(false);
       setBackendAuthMessage(null);
       setJobs([]);
@@ -400,10 +401,10 @@ export default function App() {
       issuerMismatchDetectedAtRef.current = null;
       protectedPollInFlightRef.current = false;
     }
-  }, [isSignedIn]);
+  }, [hasWorkspaceAccess]);
 
   const fetchAdminConfig = useCallback(async () => {
-    if (!isSignedIn || (!session?.is_admin && !isAdminConsoleRoute)) {
+    if (!isAdminConsoleRoute && (!isSignedIn || !session?.is_admin)) {
       setAdminConfig(null);
       setAdminConfigError(null);
       return;
@@ -441,21 +442,24 @@ export default function App() {
   }, [authenticatedFetch, extractErrorMessage, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) return;
+    if (!isLoaded || !hasWorkspaceAccess) return;
     fetchData();
     fetchAdminConfig();
     const interval = setInterval(fetchData, 8000);
     return () => clearInterval(interval);
-  }, [fetchAdminConfig, fetchData, isLoaded, isSignedIn]);
+  }, [fetchAdminConfig, fetchData, hasWorkspaceAccess, isLoaded]);
 
-  const handleProcess = async (url: string, numClips: number) => {
+  const handleProcess = useCallback(async (url: string, numClips: number) => {
     setProcessing(true);
     try {
-      const res = await authenticatedFetch('/process', {
+      const requestInit: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, num_clips: numClips }),
-      });
+      };
+      const res = isAdminConsoleRoute
+        ? await publicFetch('/process', requestInit)
+        : await authenticatedFetch('/process', requestInit);
       if (res?.ok) {
         showNotice('success', 'AI Pipeline engaged! Check History for progress.');
         setActiveTab('history');
@@ -469,24 +473,24 @@ export default function App() {
       setProcessing(false);
     }
     return false;
-  };
+  }, [authenticatedFetch, extractErrorMessage, fetchData, isAdminConsoleRoute, publicFetch, showNotice]);
 
-  const handleUpload = async (file: File, numClips: number) => {
+  const handleUpload = useCallback(async (file: File, numClips: number) => {
     setProcessing(true);
     try {
-      const token = await getBearerToken();
-      if (!token) {
-        showNotice('error', 'Session is not authorized. Sign in again.');
-        return;
-      }
       const formData = new FormData();
       formData.append('file', file);
       formData.append('num_clips', String(numClips));
-      const res = await fetch(`${API_BASE}${apiPath('/process/upload')}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
+      const requestInit: RequestInit = { method: 'POST', body: formData };
+      if (!isAdminConsoleRoute) {
+        const token = await getBearerToken();
+        if (!token) {
+          showNotice('error', 'Session is not authorized. Sign in again.');
+          return;
+        }
+        requestInit.headers = { Authorization: `Bearer ${token}` };
+      }
+      const res = await fetch(`${API_BASE}${apiPath('/process/upload')}`, requestInit);
       if (res?.ok) {
         showNotice('success', 'Upload started! Check History for progress.');
         setActiveTab('history');
@@ -499,9 +503,9 @@ export default function App() {
     } finally {
       setProcessing(false);
     }
-  };
+  }, [API_BASE, apiPath, extractErrorMessage, fetchData, getBearerToken, isAdminConsoleRoute, showNotice]);
 
-  const handleYouTubeUpload = async (job: Job) => {
+  const handleYouTubeUpload = useCallback(async (job: Job) => {
     const clips = job.results || job.shorts || [];
     if (!clips.length) {
       showNotice('error', 'No clips to upload');
@@ -515,11 +519,14 @@ export default function App() {
       privacy_status: youtubeStatus?.default_privacy_status || adminConfig?.youtube_default_privacy || 'private',
     }));
     try {
-      const res = await authenticatedFetch('/youtube/upload/batch', {
+      const requestInit: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uploads }),
-      });
+      };
+      const res = isAdminConsoleRoute
+        ? await publicFetch('/youtube/upload/batch', requestInit)
+        : await authenticatedFetch('/youtube/upload/batch', requestInit);
       const data = await readResponseBody(res, { endpoint: '/youtube/upload/batch', expectJson: true });
       if (res?.ok && data?.uploaded_count > 0) {
         showNotice('success', `Uploaded ${data.uploaded_count} clip${data.uploaded_count > 1 ? 's' : ''} to YouTube!`);
@@ -531,11 +538,13 @@ export default function App() {
       console.error('YouTube upload error:', e);
       showNotice('error', 'YouTube upload failed - check configuration and connection');
     }
-  };
+  }, [adminConfig?.youtube_default_privacy, authenticatedFetch, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice, youtubeStatus?.default_privacy_status]);
 
   const handleConnectYouTube = useCallback(async () => {
     try {
-      const res = await authenticatedFetch('/youtube/auth/start', { method: 'POST' });
+      const res = isAdminConsoleRoute
+        ? await publicFetch('/youtube/auth/start', { method: 'POST' })
+        : await authenticatedFetch('/youtube/auth/start', { method: 'POST' });
       if (!res?.ok) {
         showNotice('error', await extractErrorMessage(res, 'Failed to start YouTube auth'));
         return;
@@ -572,11 +581,13 @@ export default function App() {
     } catch {
       showNotice('error', 'YouTube auth error');
     }
-  }, [authenticatedFetch, extractErrorMessage, fetchAdminConfig, fetchData, readResponseBody, showNotice]);
+  }, [authenticatedFetch, extractErrorMessage, fetchAdminConfig, fetchData, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
 
-  const handleDisconnectYouTube = async () => {
+  const handleDisconnectYouTube = useCallback(async () => {
     try {
-      const res = await authenticatedFetch('/youtube/connection', { method: 'DELETE' });
+      const res = isAdminConsoleRoute
+        ? await publicFetch('/youtube/connection', { method: 'DELETE' })
+        : await authenticatedFetch('/youtube/connection', { method: 'DELETE' });
       if (res?.ok) {
         showNotice('info', 'YouTube disconnected.');
         fetchData();
@@ -586,16 +597,19 @@ export default function App() {
     } catch {
       showNotice('error', 'Disconnect failed');
     }
-  };
+  }, [authenticatedFetch, extractErrorMessage, fetchData, isAdminConsoleRoute, publicFetch, showNotice]);
 
-  const handleSaveYouTubeConfig = async (payload: object) => {
+  const handleSaveYouTubeConfig = useCallback(async (payload: object) => {
     setYouTubeSaving(true);
     try {
-      const res = await authenticatedFetch('/youtube/config', {
+      const requestInit: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
+      };
+      const res = isAdminConsoleRoute
+        ? await publicFetch('/youtube/config', requestInit)
+        : await authenticatedFetch('/youtube/config', requestInit);
       const data = await readResponseBody(res, { endpoint: '/youtube/config', expectJson: true });
       if (res?.ok) {
         showNotice('success', data?.message || 'YouTube settings saved.');
@@ -608,16 +622,19 @@ export default function App() {
     } finally {
       setYouTubeSaving(false);
     }
-  };
+  }, [authenticatedFetch, fetchData, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
 
-  const handleSaveAIConfig = async (payload: object) => {
+  const handleSaveAIConfig = useCallback(async (payload: object) => {
     setSettingsSaving(true);
     try {
-      const res = await authenticatedFetch('/ai/config', {
+      const requestInit: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
+      };
+      const res = isAdminConsoleRoute
+        ? await publicFetch('/ai/config', requestInit)
+        : await authenticatedFetch('/ai/config', requestInit);
       const data = await readResponseBody(res, { endpoint: '/ai/config', expectJson: true });
       if (res?.ok) {
         showNotice('success', data?.message || 'Settings saved!');
@@ -631,21 +648,20 @@ export default function App() {
     } finally {
       setSettingsSaving(false);
     }
-  };
+  }, [authenticatedFetch, fetchAdminConfig, fetchData, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
 
   const handleClipAccess = useCallback(async (filename: string, mode: 'open' | 'download' = 'open') => {
-    const token = await getToken();
-    if (!token) {
-      showNotice('error', 'Your session expired. Sign in again to access generated clips.');
-      return;
-    }
-
     try {
-      const res = await fetch(`${API_BASE}${apiPath(`/shorts/${encodeURIComponent(filename)}`)}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const headers: HeadersInit = {};
+      if (!isAdminConsoleRoute) {
+        const token = await getToken();
+        if (!token) {
+          showNotice('error', 'Your session expired. Sign in again to access generated clips.');
+          return;
+        }
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}${apiPath(`/shorts/${encodeURIComponent(filename)}`)}`, { headers });
 
       if (!res.ok) {
         showNotice('error', await extractErrorMessage(res, 'Unable to access clip'));
@@ -680,7 +696,7 @@ export default function App() {
       console.error(error);
       showNotice('error', 'Unable to access clip');
     }
-  }, [apiPath, extractErrorMessage, getToken, showNotice]);
+  }, [API_BASE, apiPath, extractErrorMessage, getToken, isAdminConsoleRoute, showNotice]);
 
   const pageSubtitles: Record<string, string> = {
     process: 'Launch a new AI extraction job',
@@ -692,12 +708,12 @@ export default function App() {
   if (!isLoaded) return null;
 
   const isAdmin = isAdminConsoleRoute || !!session?.is_admin;
-  const canManageYouTube = isSignedIn;
+  const canManageYouTube = hasWorkspaceAccess;
   const youtubeConnected = !!youtubeStatus?.connected;
 
   return (
     <div className="app-shell">
-      {!isSignedIn ? (
+      {!hasWorkspaceAccess ? (
         <LandingPage />
       ) : (
         <div className={styles.workspace}>
@@ -705,6 +721,7 @@ export default function App() {
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             hasAdmin={isAdmin}
+            showUser={!isAdminConsoleRoute && isSignedIn}
           />
 
           <main className={styles.main}>
@@ -778,6 +795,7 @@ export default function App() {
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             hasAdmin={isAdmin}
+            showUser={!isAdminConsoleRoute && isSignedIn}
           />
         </div>
       )}

@@ -19,9 +19,10 @@ interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   hasAdmin: boolean;
+  showUser?: boolean;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, hasAdmin }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, hasAdmin, showUser = true }: SidebarProps) {
   // Only admin features are restricted; Settings is now accessible to all
   const items = NAV_ITEMS;
 
@@ -50,9 +51,11 @@ export default function Sidebar({ activeTab, setActiveTab, hasAdmin }: SidebarPr
         ))}
       </ul>
 
-      <div className={styles.footer}>
-        <UserButton showName />
-      </div>
+      {showUser && (
+        <div className={styles.footer}>
+          <UserButton showName />
+        </div>
+      )}
     </nav>
   );
 }
