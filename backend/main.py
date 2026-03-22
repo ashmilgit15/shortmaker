@@ -2259,7 +2259,7 @@ if os.path.isdir(WEB_DIST_ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=WEB_DIST_ASSETS_DIR), name="frontend-assets")
 
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 async def serve_frontend_root():
     return _serve_spa_index()
 
@@ -2292,7 +2292,7 @@ async def health_check():
     }
 
 
-@app.get("/{full_path:path}", include_in_schema=False)
+@app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 async def serve_frontend(full_path: str):
     # Prevent API and backend routes from being swallowed by the SPA catch-all.
     blocked_prefixes = (
