@@ -58,7 +58,10 @@ BASE_DIR = Path(__file__).parent.parent
 load_dotenv_file(BASE_DIR / ".env")
 OUTPUT_DIR = BASE_DIR / "outputs"
 FRONTEND_DIR = BASE_DIR / "frontend"
-WEB_DIST_DIR = FRONTEND_DIR / "dist"
+MAIN_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+WEB_DIST_DIR = os.path.abspath(os.path.join(MAIN_FILE_DIR, "..", "frontend", "dist"))
+WEB_DIST_ASSETS_DIR = os.path.join(WEB_DIST_DIR, "assets")
+WEB_DIST_INDEX_FILE = os.path.join(WEB_DIST_DIR, "index.html")
 SHORTS_DIR = OUTPUT_DIR / "shorts"
 JOBS_DIR = OUTPUT_DIR / "jobs"
 UPLOAD_DIR = OUTPUT_DIR / "uploads"
@@ -111,6 +114,13 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _build_trusted_hosts(hosts: list[str]) -> list[str]:
+    normalized = [item for item in hosts if item]
+    if "*.onrender.com" not in normalized:
+        normalized.append("*.onrender.com")
+    return normalized
+
+
 IS_PRODUCTION = os.environ.get(APP_ENV_ENV, "").strip().lower() == "production"
 PUBLIC_DOCS_ENABLED = os.environ.get(PUBLIC_DOCS_ENV, "").strip().lower() in {"1", "true", "yes"}
 DEFAULT_ALLOWED_ORIGINS = "http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:5173,http://localhost:5173"
@@ -138,7 +148,7 @@ app.add_middleware(
 
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=ALLOWED_HOSTS or ["127.0.0.1", "localhost"],
+    allowed_hosts=_build_trusted_hosts(ALLOWED_HOSTS or ["127.0.0.1", "localhost"]),
 )
 
 
@@ -2236,27 +2246,22 @@ async def admin_get_capabilities():
 # Frontend Serving
 # ========================================
 
-if WEB_DIST_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(WEB_DIST_DIR / "assets")), name="frontend-assets")
-    
-    @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
-        # Prevent API routes from being swallowed by the catch-all
-        if (
-            full_path.startswith("api/")
-            or full_path.startswith("docs")
-            or full_path.startswith("redoc")
-            or full_path in {"health", "openapi.json", "favicon.ico"}
-        ):
-             raise HTTPException(status_code=404)
-             
-        index_file = WEB_DIST_DIR / "index.html"
-        if index_file.exists():
-            return FileResponse(
-                str(index_file),
-                headers={"Cache-Control": "no-store, max-age=0"},
-            )
+def _serve_spa_index() -> FileResponse:
+    if not os.path.exists(WEB_DIST_INDEX_FILE):
         raise HTTPException(status_code=404, detail="Frontend build not found.")
+    return FileResponse(
+        WEB_DIST_INDEX_FILE,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+if os.path.isdir(WEB_DIST_ASSETS_DIR):
+    app.mount("/assets", StaticFiles(directory=WEB_DIST_ASSETS_DIR), name="frontend-assets")
+
+
+@app.get("/", include_in_schema=False)
+async def serve_frontend_root():
+    return _serve_spa_index()
 
 
 @app.get("/favicon.ico")
@@ -2285,6 +2290,35 @@ async def health_check():
         "ai_enabled": ai_status,
         "database_enabled": database_enabled(),
     }
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    # Prevent API and backend routes from being swallowed by the SPA catch-all.
+    blocked_prefixes = (
+        "api/",
+        "ashmil2010/",
+        "process",
+        "status/",
+        "result/",
+        "jobs",
+        "session",
+        "capabilities",
+        "youtube",
+        "trends",
+        "ai/",
+        "auth/",
+        "shorts/",
+        "docs",
+        "redoc",
+        "openapi.json",
+        "health",
+        "favicon.ico",
+        "assets/",
+    )
+    if full_path in {"health", "openapi.json", "favicon.ico"} or full_path.startswith(blocked_prefixes):
+        raise HTTPException(status_code=404)
+    return _serve_spa_index()
 
 
 # ========================================
