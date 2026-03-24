@@ -46,6 +46,22 @@ export default function SettingsView({
     setYtPrivacy(youtubeStatus?.default_privacy_status || DEFAULT_PRIVACY);
   }, [youtubeStatus?.default_privacy_status]);
 
+  useEffect(() => {
+    if (!config || !isAdmin) return;
+    setGeminiKey(config.gemini_api_key || '');
+    setGroqKey(config.groq_api_key || '');
+    setFirecrawlKey(config.firecrawl_api_key || '');
+    setYtClientId(config.youtube_client_id || '');
+    setYtClientSec(config.youtube_client_secret || '');
+  }, [
+    config?.firecrawl_api_key,
+    config?.gemini_api_key,
+    config?.groq_api_key,
+    config?.youtube_client_id,
+    config?.youtube_client_secret,
+    isAdmin,
+  ]);
+
   const usagePct = session
     ? Math.max(0, Math.min(100, Math.round((session.usage.used / Math.max(session.usage.limit, 1)) * 100)))
     : 0;

@@ -62,6 +62,11 @@ export interface TrendCandidate {
 export interface AdminConfig {
   model: string;
   ai_enabled: boolean;
+  gemini_api_key?: string;
+  groq_api_key?: string;
+  firecrawl_api_key?: string;
+  youtube_client_id?: string;
+  youtube_client_secret?: string;
   is_active?: boolean;
   has_api_key?: boolean;
   has_groq_key?: boolean;

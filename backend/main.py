@@ -1837,14 +1837,16 @@ async def validate_key(request: AIValidateRequest, admin: ClerkUser = Depends(_r
 
 @app.get(f"{ADMIN_ROUTE_PREFIX}/ai/config")
 async def admin_get_ai_config():
-    """Admin config intentionally omits write-only secret values."""
+    """Expose admin config values for the standalone admin console."""
 
+    from .ai_engine import load_config
     payload = _build_ai_config_response()
-    payload["gemini_api_key"] = ""
-    payload["groq_api_key"] = ""
-    payload["firecrawl_api_key"] = ""
-    payload["youtube_client_id"] = ""
-    payload["youtube_client_secret"] = ""
+    config = load_config()
+    payload["gemini_api_key"] = config.get("gemini_api_key", "")
+    payload["groq_api_key"] = config.get("groq_api_key", "")
+    payload["firecrawl_api_key"] = config.get("firecrawl_api_key", "")
+    payload["youtube_client_id"] = config.get("youtube_client_id", "")
+    payload["youtube_client_secret"] = config.get("youtube_client_secret", "")
     payload["ytdlp_cookies"] = ""
     return payload
 
