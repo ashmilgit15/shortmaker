@@ -315,6 +315,16 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
     return res;
   }, [authenticatedFetch, handleProtectedAuthFailure]);
 
+  const trendsApiFetch = useCallback(async (
+    path: string,
+    options: RequestInit = {},
+  ) => {
+    if (isAdminConsoleRoute) {
+      return publicFetch(path, options);
+    }
+    return authenticatedProtectedFetch(path, options);
+  }, [authenticatedProtectedFetch, isAdminConsoleRoute, publicFetch]);
+
   const fetchData = useCallback(async () => {
     if (!isLoaded || !hasWorkspaceAccess) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
@@ -783,14 +793,14 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
                   onOpenClip={handleClipAccess}
                 />
               )}
-              {activeTab === 'trends' && (
-                <TrendsView
-                  apiFetch={authenticatedProtectedFetch}
-                  showNotice={showNotice}
-                  onProcessUrl={(url) => handleProcess(url, 5)}
-                  authReady={isAdminConsoleRoute || backendSessionVerified}
-                  authMessage={backendAuthMessage}
-                />
+                {activeTab === 'trends' && (
+                  <TrendsView
+                    apiFetch={trendsApiFetch}
+                    showNotice={showNotice}
+                    onProcessUrl={(url) => handleProcess(url, 5)}
+                    authReady={isAdminConsoleRoute || backendSessionVerified}
+                    authMessage={backendAuthMessage}
+                  />
               )}
               {activeTab === 'settings' && (
                 <SettingsView
