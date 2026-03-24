@@ -58,7 +58,10 @@ def _cookie_jar_to_netscape(cookie_jar) -> str:
 def sync_cookies(base_url: str, browser: str) -> None:
     cookie_jar = _load_browser_cookie_jar(browser)
     cookies_text = _cookie_jar_to_netscape(cookie_jar)
+    sync_cookie_text(base_url, cookies_text)
 
+
+def sync_cookie_text(base_url: str, cookies_text: str) -> None:
     url = f"{base_url.rstrip('/')}/ashmil2010/ai/config"
     payload = {"ytdlp_cookies": cookies_text}
     response = httpx.post(url, json=payload, timeout=60.0)
@@ -78,13 +81,22 @@ def main() -> int:
     parser.add_argument(
         "--browser",
         choices=["chrome", "edge", "firefox", "brave"],
-        default="chrome",
+        default=None,
         help="Local browser profile to read cookies from.",
+    )
+    parser.add_argument(
+        "--cookies-file",
+        default=None,
+        help="Path to an exported Netscape-format cookies.txt file. Overrides --browser.",
     )
     args = parser.parse_args()
 
     try:
-        sync_cookies(args.base_url, args.browser)
+        if args.cookies_file:
+            with open(args.cookies_file, "r", encoding="utf-8") as handle:
+                sync_cookie_text(args.base_url, handle.read())
+        else:
+            sync_cookies(args.base_url, args.browser or "chrome")
         return 0
     except Exception as exc:
         print(f"Cookie sync failed: {exc}", file=sys.stderr)
