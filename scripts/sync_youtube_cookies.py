@@ -6,6 +6,15 @@ from http.cookiejar import Cookie
 
 import httpx
 
+COOKIE_DOMAIN_SUFFIXES = (
+    "youtube.com",
+    "google.com",
+    "googlevideo.com",
+    "ytimg.com",
+    "youtube-nocookie.com",
+    "ggpht.com",
+)
+
 
 def _load_browser_cookie_jar(browser: str):
     try:
@@ -25,7 +34,7 @@ def _load_browser_cookie_jar(browser: str):
     loader = loaders.get(browser)
     if loader is None:
         raise RuntimeError(f"Unsupported browser '{browser}'.")
-    return loader(domain_name="youtube.com")
+    return loader()
 
 
 def _to_netscape_line(cookie: Cookie) -> str:
@@ -43,7 +52,8 @@ def _cookie_jar_to_netscape(cookie_jar) -> str:
     lines = ["# Netscape HTTP Cookie File"]
     seen: set[tuple[str, str, str]] = set()
     for cookie in cookie_jar:
-        if "youtube.com" not in (cookie.domain or ""):
+        domain = (cookie.domain or "").lstrip(".").lower()
+        if not any(domain.endswith(suffix) for suffix in COOKIE_DOMAIN_SUFFIXES):
             continue
         key = (cookie.domain, cookie.path, cookie.name)
         if key in seen:
