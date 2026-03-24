@@ -3,12 +3,15 @@ video.py - YouTube video downloader using yt-dlp
 """
 
 import base64
+import logging
 import os
 import tempfile
 import time
 import yt_dlp
 from pathlib import Path
 from utils.binaries import ensure_ffmpeg_on_path, resolve_binary
+
+logger = logging.getLogger(__name__)
 
 YT_DLP_JS_RUNTIMES = {'node': {}}
 YTDLP_FORMAT = os.environ.get(
@@ -32,12 +35,56 @@ YTDLP_RETRY_BACKOFF_SECONDS = float(os.environ.get("SHORTMAKER_YTDLP_RETRY_BACKO
 YTDLP_COOKIE_FILE_ENV = "SHORTMAKER_YTDLP_COOKIES_FILE"
 YTDLP_COOKIE_TEXT_ENV = "SHORTMAKER_YTDLP_COOKIES"
 YTDLP_COOKIE_BASE64_ENV = "SHORTMAKER_YTDLP_COOKIES_BASE64"
+YTDLP_POT_PROVIDER_ENV = "SHORTMAKER_YTDLP_POT_PROVIDER"
+YTDLP_POT_BASE_URL_ENV = "SHORTMAKER_YTDLP_POT_BASE_URL"
+YTDLP_POT_SERVER_HOME_ENV = "SHORTMAKER_YTDLP_POT_SERVER_HOME"
+YTDLP_POT_PLAYER_CLIENTS_ENV = "SHORTMAKER_YTDLP_POT_PLAYER_CLIENTS"
+YTDLP_POT_TOKEN_TTL_ENV = "SHORTMAKER_YTDLP_POT_TOKEN_TTL"
 
 ensure_ffmpeg_on_path()
 
 
+def _env_csv(name: str, default: str) -> list[str]:
+    raw = os.environ.get(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _build_youtube_extractor_args() -> dict:
+    provider = os.environ.get(YTDLP_POT_PROVIDER_ENV, "").strip().lower()
+    if not provider:
+        return {}
+
+    player_clients = _env_csv(YTDLP_POT_PLAYER_CLIENTS_ENV, "mweb,web")
+    extractor_args: dict[str, dict[str, list[str]]] = {}
+    if player_clients:
+        extractor_args["youtube"] = {"player_client": player_clients}
+
+    token_ttl = os.environ.get(YTDLP_POT_TOKEN_TTL_ENV, "").strip()
+    if token_ttl:
+        os.environ.setdefault("TOKEN_TTL", token_ttl)
+
+    if provider == "http":
+        base_url = os.environ.get(YTDLP_POT_BASE_URL_ENV, "").strip()
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [base_url]} if base_url else {}
+        return extractor_args
+
+    if provider == "script":
+        server_home = os.environ.get(YTDLP_POT_SERVER_HOME_ENV, "").strip()
+        if not server_home:
+            logger.warning("%s is set to script, but %s is empty", YTDLP_POT_PROVIDER_ENV, YTDLP_POT_SERVER_HOME_ENV)
+            return {}
+        if not Path(server_home).exists():
+            logger.warning("Configured yt-dlp POT provider path does not exist: %s", server_home)
+            return {}
+        extractor_args["youtubepot-bgutilscript"] = {"server_home": [server_home]}
+        return extractor_args
+
+    logger.warning("Unsupported yt-dlp POT provider '%s'; continuing without PO token provider", provider)
+    return {}
+
+
 def _build_ydl_common_opts() -> dict:
-    return {
+    ydl_opts = {
         'js_runtimes': YT_DLP_JS_RUNTIMES,
         'retries': YTDLP_RETRIES,
         'fragment_retries': YTDLP_FRAGMENT_RETRIES,
@@ -47,6 +94,10 @@ def _build_ydl_common_opts() -> dict:
         'http_chunk_size': YTDLP_HTTP_CHUNK_SIZE,
         'concurrent_fragment_downloads': 1,
     }
+    extractor_args = _build_youtube_extractor_args()
+    if extractor_args:
+        ydl_opts['extractor_args'] = extractor_args
+    return ydl_opts
 
 
 def _clear_partial_downloads(output_dir: str, video_id: str) -> None:
@@ -189,9 +240,12 @@ def download_video(url: str, output_dir: str) -> dict:
                 last_error = exc
                 message = str(exc)
                 if "Sign in to confirm you’re not a bot" in message or "Sign in to confirm you're not a bot" in message:
+                    pot_provider = os.environ.get(YTDLP_POT_PROVIDER_ENV, "").strip() or "disabled"
                     raise RuntimeError(
                         "YouTube blocked this download. Configure Netscape-format YouTube cookies via "
-                        f"{YTDLP_COOKIE_FILE_ENV}, {YTDLP_COOKIE_TEXT_ENV}, or {YTDLP_COOKIE_BASE64_ENV}."
+                        f"{YTDLP_COOKIE_FILE_ENV}, {YTDLP_COOKIE_TEXT_ENV}, or {YTDLP_COOKIE_BASE64_ENV}. "
+                        f"If cookies are already configured, ensure the PO token provider is available "
+                        f"(current: {pot_provider})."
                     ) from exc
                 if "Requested format is not available" in message:
                     print(

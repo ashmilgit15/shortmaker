@@ -5,15 +5,25 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONIOENCODING=utf-8
+ENV SHORTMAKER_YTDLP_POT_PROVIDER=script
+ENV SHORTMAKER_YTDLP_POT_SERVER_HOME=/opt/bgutil-ytdlp-pot-provider/server
 
 # Install system dependencies for media processing
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
      ffmpeg \
      git \
-     nodejs \
-     npm \
+     curl \
+     gnupg \
      ca-certificates \
+  && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+     > /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+     nodejs \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 10001 --shell /bin/bash appuser
@@ -21,6 +31,13 @@ RUN useradd --create-home --uid 10001 --shell /bin/bash appuser
 COPY requirements.txt requirements.txt
 RUN python -m pip install --upgrade pip \
   && pip install --no-cache-dir -r requirements.txt
+
+ARG BGUTIL_POT_PROVIDER_REF=1.3.1
+RUN git clone --depth 1 --branch ${BGUTIL_POT_PROVIDER_REF} \
+     https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-ytdlp-pot-provider \
+  && cd /opt/bgutil-ytdlp-pot-provider/server \
+  && npm ci \
+  && npx tsc
 
 COPY frontend/package.json frontend/package.json
 COPY frontend/tsconfig.json frontend/tsconfig.json
