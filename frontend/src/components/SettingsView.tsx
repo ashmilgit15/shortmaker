@@ -36,6 +36,7 @@ export default function SettingsView({
   const [geminiKey, setGeminiKey] = useState('');
   const [groqKey, setGroqKey] = useState('');
   const [firecrawlKey, setFirecrawlKey] = useState('');
+  const [ytdlpCookies, setYtdlpCookies] = useState('');
   const [ytClientId, setYtClientId] = useState('');
   const [ytClientSec, setYtClientSec] = useState('');
   const [ytPrivacy, setYtPrivacy] = useState(youtubeStatus?.default_privacy_status || DEFAULT_PRIVACY);
@@ -55,10 +56,12 @@ export default function SettingsView({
     if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim();
     if (groqKey.trim()) payload.groq_api_key = groqKey.trim();
     if (firecrawlKey.trim()) payload.firecrawl_api_key = firecrawlKey.trim();
+    if (ytdlpCookies.trim()) payload.ytdlp_cookies = ytdlpCookies.trim();
     await onSaveAIConfig(payload);
     setGeminiKey('');
     setGroqKey('');
     setFirecrawlKey('');
+    setYtdlpCookies('');
   };
 
   const handleSaveYouTube = async (e: React.FormEvent) => {
@@ -337,6 +340,35 @@ export default function SettingsView({
                 isSet={!!config.has_firecrawl_key}
                 hint="Enables live trend discovery from the web"
               />
+            </div>
+
+            <div className={styles.subSection}>
+              <div className={styles.subTitle}>
+                <span className={`material-symbols-outlined ${styles.subIcon}`}>cookie</span>
+                YouTube Download Session
+              </div>
+              <p className={styles.subDesc}>
+                Paste Netscape-format <code>cookies.txt</code> content once to let the server download protected YouTube source videos.
+              </p>
+              <label className={styles.keyLabel}>
+                Download Cookies
+                {config.has_ytdlp_cookies && (
+                  <span className={styles.keySetBadge}>
+                    <span className={`material-symbols-outlined ${styles.keySetIcon}`}>check</span>
+                    Set
+                  </span>
+                )}
+              </label>
+              <textarea
+                className={styles.cookiesArea}
+                placeholder={config.has_ytdlp_cookies ? 'Stored securely. Paste new cookies here only when you need to refresh them.' : '# Netscape HTTP Cookie File'}
+                value={ytdlpCookies}
+                onChange={(e) => setYtdlpCookies(e.target.value)}
+                spellCheck={false}
+              />
+              <p className={styles.keyHint}>
+                Export this from a signed-in YouTube browser session. Existing stored cookies stay in place if you leave this blank.
+              </p>
             </div>
 
             <button type="submit" className={`btn btn-primary ${styles.saveBtn}`} disabled={saving}>

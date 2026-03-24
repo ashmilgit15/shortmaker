@@ -15,6 +15,7 @@ import uuid
 import json
 import traceback
 import secrets
+import base64
 import hashlib
 import ipaddress
 import socket
@@ -203,6 +204,7 @@ class AIConfigRequest(BaseModel):
     firecrawl_api_key: str = ""
     youtube_client_id: str = ""
     youtube_client_secret: str = ""
+    ytdlp_cookies: str = ""
     youtube_default_privacy: str = "private"
     ai_enabled: bool = True
     model: str = "gemini-2.5-flash"
@@ -1710,6 +1712,7 @@ def _build_ai_config_response() -> dict:
         "has_api_key": bool(api_key),
         "has_groq_key": bool(config.get("groq_api_key", "")),
         "has_firecrawl_key": bool(config.get("firecrawl_api_key", "")),
+        "has_ytdlp_cookies": bool(config.get("ytdlp_cookies_base64", "")),
         "has_youtube_client_config": youtube_status.get("has_client_config", False),
         "has_youtube_connection": youtube_status.get("connected", False),
         "youtube_default_privacy": youtube_status.get("default_privacy_status", "private"),
@@ -1740,6 +1743,7 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
         request.firecrawl_api_key,
         request.youtube_client_id,
         request.youtube_client_secret,
+        request.ytdlp_cookies,
     )
     normalized_privacy = request.youtube_default_privacy.strip().lower() or "private"
     if normalized_privacy not in VALID_PRIVACY_STATUSES:
@@ -1758,6 +1762,11 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
         "firecrawl_api_key": request.firecrawl_api_key or existing.get("firecrawl_api_key", ""),
         "youtube_client_id": request.youtube_client_id or existing.get("youtube_client_id", ""),
         "youtube_client_secret": request.youtube_client_secret or existing.get("youtube_client_secret", ""),
+        "ytdlp_cookies_base64": (
+            base64.b64encode(request.ytdlp_cookies.encode("utf-8")).decode("utf-8")
+            if request.ytdlp_cookies.strip()
+            else existing.get("ytdlp_cookies_base64", "")
+        ),
         "youtube_default_privacy": normalized_privacy,
         "ai_enabled": request.ai_enabled,
         "model": request.model,
@@ -1778,6 +1787,8 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
         parts.append("Groq Whisper transcription")
     if config["firecrawl_api_key"]:
         parts.append("Firecrawl trend discovery")
+    if config["ytdlp_cookies_base64"]:
+        parts.append("YouTube source downloads")
     if config["youtube_client_id"] and config["youtube_client_secret"]:
         parts.append("YouTube publishing")
     
@@ -1834,6 +1845,7 @@ async def admin_get_ai_config():
     payload["firecrawl_api_key"] = ""
     payload["youtube_client_id"] = ""
     payload["youtube_client_secret"] = ""
+    payload["ytdlp_cookies"] = ""
     return payload
 
 

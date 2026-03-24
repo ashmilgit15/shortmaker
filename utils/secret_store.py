@@ -28,6 +28,7 @@ SECRET_FIELD_ENV_MAP: dict[str, str] = {
     "firecrawl_api_key": "FIRECRAWL_API_KEY",
     "youtube_client_id": "YOUTUBE_CLIENT_ID",
     "youtube_client_secret": "YOUTUBE_CLIENT_SECRET",
+    "ytdlp_cookies_base64": "SHORTMAKER_YTDLP_COOKIES_BASE64",
 }
 
 

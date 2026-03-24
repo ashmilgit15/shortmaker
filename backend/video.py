@@ -67,6 +67,15 @@ def _resolve_cookie_file() -> str | None:
     cookie_text = os.environ.get(YTDLP_COOKIE_TEXT_ENV, "").strip()
     cookie_base64 = os.environ.get(YTDLP_COOKIE_BASE64_ENV, "").strip()
 
+    if not cookie_text and not cookie_base64:
+        try:
+            from .ai_engine import load_config
+
+            config = load_config()
+            cookie_base64 = str(config.get("ytdlp_cookies_base64") or "").strip()
+        except Exception:
+            cookie_base64 = ""
+
     if not cookie_text and cookie_base64:
         try:
             cookie_text = base64.b64decode(cookie_base64).decode("utf-8")

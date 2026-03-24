@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
     "firecrawl_api_key": "",
     "youtube_client_id": "",
     "youtube_client_secret": "",
+    "ytdlp_cookies_base64": "",
     "youtube_default_privacy": "private",
     "ai_enabled": False,
     "model": "gemini-2.5-flash",

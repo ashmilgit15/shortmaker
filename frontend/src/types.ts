@@ -66,6 +66,7 @@ export interface AdminConfig {
   has_api_key?: boolean;
   has_groq_key?: boolean;
   has_firecrawl_key?: boolean;
+  has_ytdlp_cookies?: boolean;
   has_youtube_client_config?: boolean;
   has_youtube_connection?: boolean;
   youtube_default_privacy?: string;

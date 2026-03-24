@@ -205,6 +205,14 @@
 
 .keyHint { font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
 
+.cookiesArea {
+  min-height: 180px;
+  resize: vertical;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
 .subSection { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
 
 .subTitle {
