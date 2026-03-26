@@ -72,6 +72,14 @@ export interface AdminConfig {
   has_groq_key?: boolean;
   has_firecrawl_key?: boolean;
   has_ytdlp_cookies?: boolean;
+  browser_cookie_import_supported?: boolean;
+  ytdlp_cookie_auto_sync_enabled?: boolean;
+  ytdlp_cookie_auto_sync_browser?: 'chrome' | 'edge' | 'firefox' | 'brave';
+  ytdlp_cookie_auto_sync_interval_hours?: number;
+  ytdlp_cookie_auto_sync_on_sign_in?: boolean;
+  ytdlp_cookie_last_synced_at?: string;
+  ytdlp_cookie_last_sync_status?: 'idle' | 'success' | 'error' | string;
+  ytdlp_cookie_last_sync_error?: string;
   has_youtube_client_config?: boolean;
   has_youtube_connection?: boolean;
   youtube_default_privacy?: string;

@@ -205,6 +205,10 @@ class AIConfigRequest(BaseModel):
     youtube_client_id: str = ""
     youtube_client_secret: str = ""
     ytdlp_cookies: str = ""
+    ytdlp_cookie_auto_sync_enabled: Optional[bool] = None
+    ytdlp_cookie_auto_sync_browser: Optional[str] = None
+    ytdlp_cookie_auto_sync_interval_hours: Optional[int] = None
+    ytdlp_cookie_auto_sync_on_sign_in: Optional[bool] = None
     youtube_default_privacy: str = "private"
     ai_enabled: bool = True
     model: str = "gemini-2.5-flash"
@@ -261,6 +265,10 @@ class YouTubeConfigRequest(BaseModel):
     youtube_client_id: str = ""
     youtube_client_secret: str = ""
     youtube_default_privacy: str = "private"
+
+
+class YouTubeCookieSyncRequest(BaseModel):
+    reason: str = "manual"
 
 
 def validate_num_clips(num_clips: int) -> int:
@@ -829,12 +837,15 @@ def update_job_status(job_id: str, stage: str, progress: int, message: str,
 
 @app.on_event("startup")
 async def _recover_interrupted_jobs_on_startup():
+    from .ytdlp_cookie_sync import ensure_cookie_auto_sync_worker_started
+
     if not os.environ.get("CLERK_ISSUER", "").strip():
         logger.warning("CLERK_ISSUER is not configured. Authenticated routes will reject requests.")
     if not _split_csv_env("SHORTMAKER_ADMIN_USER_IDS") and not _split_csv_env("SHORTMAKER_ADMIN_EMAILS"):
         logger.warning("No admin allowlist configured. Admin routes are disabled until SHORTMAKER_ADMIN_USER_IDS or SHORTMAKER_ADMIN_EMAILS is set.")
     init_database()
     recover_incomplete_jobs()
+    ensure_cookie_auto_sync_worker_started()
 
 
 def list_recent_jobs(
@@ -1702,10 +1713,12 @@ def _build_ai_config_response() -> dict:
     """Get current AI configuration status."""
     from .ai_engine import load_config, is_ai_enabled, get_api_key
     from .youtube_publish import get_youtube_status
+    from .ytdlp_cookie_sync import browser_cookie_dependency_available, get_cookie_auto_sync_state
     
     config = load_config()
     api_key = get_api_key()
     youtube_status = get_youtube_status()
+    cookie_sync_state = get_cookie_auto_sync_state(config)
     
     return {
         "ai_enabled": config.get("ai_enabled", False),
@@ -1713,6 +1726,8 @@ def _build_ai_config_response() -> dict:
         "has_groq_key": bool(config.get("groq_api_key", "")),
         "has_firecrawl_key": bool(config.get("firecrawl_api_key", "")),
         "has_ytdlp_cookies": bool(config.get("ytdlp_cookies_base64", "")),
+        "browser_cookie_import_supported": browser_cookie_dependency_available(),
+        **cookie_sync_state,
         "has_youtube_client_config": youtube_status.get("has_client_config", False),
         "has_youtube_connection": youtube_status.get("connected", False),
         "youtube_default_privacy": youtube_status.get("default_privacy_status", "private"),
@@ -1731,6 +1746,11 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
     """Configure AI settings."""
     from .ai_engine import save_config, check_api_key_format, load_config
     from .youtube_publish import VALID_PRIVACY_STATUSES
+    from .ytdlp_cookie_sync import (
+        get_cookie_auto_sync_state,
+        normalize_cookie_auto_sync_browser,
+        normalize_cookie_auto_sync_interval_hours,
+    )
     
     # Quick format check for Gemini key (no live API call)
     if request.gemini_api_key:
@@ -1751,9 +1771,30 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
     
     # Load existing config to preserve keys and automation credentials not updated by this endpoint
     existing = load_config()
+    existing_cookie_sync_state = get_cookie_auto_sync_state(existing)
     youtube_client_changed = bool(
         (request.youtube_client_id and request.youtube_client_id != existing.get("youtube_client_id", ""))
         or (request.youtube_client_secret and request.youtube_client_secret != existing.get("youtube_client_secret", ""))
+    )
+    auto_sync_enabled = (
+        request.ytdlp_cookie_auto_sync_enabled
+        if request.ytdlp_cookie_auto_sync_enabled is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_enabled"]
+    )
+    auto_sync_browser = normalize_cookie_auto_sync_browser(
+        request.ytdlp_cookie_auto_sync_browser
+        if request.ytdlp_cookie_auto_sync_browser is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_browser"]
+    )
+    auto_sync_interval_hours = normalize_cookie_auto_sync_interval_hours(
+        request.ytdlp_cookie_auto_sync_interval_hours
+        if request.ytdlp_cookie_auto_sync_interval_hours is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_interval_hours"]
+    )
+    auto_sync_on_sign_in = (
+        request.ytdlp_cookie_auto_sync_on_sign_in
+        if request.ytdlp_cookie_auto_sync_on_sign_in is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_on_sign_in"]
     )
 
     config = {
@@ -1767,6 +1808,10 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
             if request.ytdlp_cookies.strip()
             else existing.get("ytdlp_cookies_base64", "")
         ),
+        "ytdlp_cookie_auto_sync_enabled": auto_sync_enabled,
+        "ytdlp_cookie_auto_sync_browser": auto_sync_browser,
+        "ytdlp_cookie_auto_sync_interval_hours": auto_sync_interval_hours,
+        "ytdlp_cookie_auto_sync_on_sign_in": auto_sync_on_sign_in,
         "youtube_default_privacy": normalized_privacy,
         "ai_enabled": request.ai_enabled,
         "model": request.model,
@@ -1802,6 +1847,10 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
         "has_firecrawl_key": bool(config["firecrawl_api_key"]),
         "has_youtube_client_config": bool(config["youtube_client_id"] and config["youtube_client_secret"]),
         "has_youtube_connection": bool(merged.get("youtube_oauth", {}).get("refresh_token")),
+        "ytdlp_cookie_auto_sync_enabled": auto_sync_enabled,
+        "ytdlp_cookie_auto_sync_browser": auto_sync_browser,
+        "ytdlp_cookie_auto_sync_interval_hours": auto_sync_interval_hours,
+        "ytdlp_cookie_auto_sync_on_sign_in": auto_sync_on_sign_in,
         "youtube_default_privacy": normalized_privacy,
         "model": request.model,
         "message": f"Saved! Enabled: {feature_msg}." if request.ai_enabled else "AI features disabled."
@@ -1860,6 +1909,36 @@ async def admin_set_ai_config(request: AIConfigRequest):
 @app.post(f"{ADMIN_ROUTE_PREFIX}/ai/validate")
 async def admin_validate_key(request: AIValidateRequest):
     return _validate_ai_key(request)
+
+
+def _run_ytdlp_cookie_sync(reason: str) -> dict:
+    from .ytdlp_cookie_sync import maybe_sync_cookies_for_sign_in, sync_cookies_with_status
+
+    normalized_reason = (reason or "manual").strip().lower()
+    if normalized_reason == "login":
+        return maybe_sync_cookies_for_sign_in()
+    return sync_cookies_with_status(reason=normalized_reason or "manual")
+
+
+@app.post("/youtube/cookies/sync")
+async def sync_youtube_cookies(
+    request: YouTubeCookieSyncRequest,
+    admin: ClerkUser = Depends(_require_admin_user),
+):
+    result = _run_ytdlp_cookie_sync(request.reason)
+    status_code = 200 if result.get("ok", False) else 500
+    if status_code != 200:
+        raise HTTPException(status_code=status_code, detail=result.get("error") or result.get("message") or "Cookie sync failed.")
+    return result
+
+
+@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/cookies/sync")
+async def admin_sync_youtube_cookies(request: YouTubeCookieSyncRequest):
+    result = _run_ytdlp_cookie_sync(request.reason)
+    status_code = 200 if result.get("ok", False) else 500
+    if status_code != 200:
+        raise HTTPException(status_code=status_code, detail=result.get("error") or result.get("message") or "Cookie sync failed.")
+    return result
 
 
 @app.post("/trends/discover")

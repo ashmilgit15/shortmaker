@@ -11,13 +11,17 @@ interface SettingsViewProps {
   onRetryAdminConfig?: () => Promise<void>;
   onSaveAIConfig: (payload: object) => Promise<void>;
   onSaveYouTubeConfig: (payload: object) => Promise<void>;
+  onSyncYouTubeCookies: (reason?: 'manual' | 'login') => Promise<void>;
   onConnectYouTube: () => Promise<void>;
   onDisconnectYouTube: () => Promise<void>;
   saving: boolean;
+  cookieSyncing: boolean;
   youtubeSaving: boolean;
 }
 
 const DEFAULT_PRIVACY = 'private';
+const DEFAULT_COOKIE_BROWSER: NonNullable<AdminConfig['ytdlp_cookie_auto_sync_browser']> = 'chrome';
+const DEFAULT_COOKIE_INTERVAL_HOURS = 24;
 
 export default function SettingsView({
   config,
@@ -28,15 +32,21 @@ export default function SettingsView({
   onRetryAdminConfig,
   onSaveAIConfig,
   onSaveYouTubeConfig,
+  onSyncYouTubeCookies,
   onConnectYouTube,
   onDisconnectYouTube,
   saving,
+  cookieSyncing,
   youtubeSaving,
 }: SettingsViewProps) {
   const [geminiKey, setGeminiKey] = useState('');
   const [groqKey, setGroqKey] = useState('');
   const [firecrawlKey, setFirecrawlKey] = useState('');
   const [ytdlpCookies, setYtdlpCookies] = useState('');
+  const [cookieAutoSyncEnabled, setCookieAutoSyncEnabled] = useState(false);
+  const [cookieAutoSyncBrowser, setCookieAutoSyncBrowser] = useState(DEFAULT_COOKIE_BROWSER);
+  const [cookieAutoSyncIntervalHours, setCookieAutoSyncIntervalHours] = useState(DEFAULT_COOKIE_INTERVAL_HOURS);
+  const [cookieAutoSyncOnSignIn, setCookieAutoSyncOnSignIn] = useState(false);
   const [ytClientId, setYtClientId] = useState('');
   const [ytClientSec, setYtClientSec] = useState('');
   const [ytPrivacy, setYtPrivacy] = useState(youtubeStatus?.default_privacy_status || DEFAULT_PRIVACY);
@@ -53,10 +63,18 @@ export default function SettingsView({
     setFirecrawlKey(config.firecrawl_api_key || '');
     setYtClientId(config.youtube_client_id || '');
     setYtClientSec(config.youtube_client_secret || '');
+    setCookieAutoSyncEnabled(Boolean(config.ytdlp_cookie_auto_sync_enabled));
+    setCookieAutoSyncBrowser(config.ytdlp_cookie_auto_sync_browser || DEFAULT_COOKIE_BROWSER);
+    setCookieAutoSyncIntervalHours(config.ytdlp_cookie_auto_sync_interval_hours || DEFAULT_COOKIE_INTERVAL_HOURS);
+    setCookieAutoSyncOnSignIn(Boolean(config.ytdlp_cookie_auto_sync_on_sign_in));
   }, [
     config?.firecrawl_api_key,
     config?.gemini_api_key,
     config?.groq_api_key,
+    config?.ytdlp_cookie_auto_sync_browser,
+    config?.ytdlp_cookie_auto_sync_enabled,
+    config?.ytdlp_cookie_auto_sync_interval_hours,
+    config?.ytdlp_cookie_auto_sync_on_sign_in,
     config?.youtube_client_id,
     config?.youtube_client_secret,
     isAdmin,
@@ -68,11 +86,15 @@ export default function SettingsView({
 
   const handleSaveAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload: Record<string, string> = {};
+    const payload: Record<string, string | boolean | number> = {};
     if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim();
     if (groqKey.trim()) payload.groq_api_key = groqKey.trim();
     if (firecrawlKey.trim()) payload.firecrawl_api_key = firecrawlKey.trim();
     if (ytdlpCookies.trim()) payload.ytdlp_cookies = ytdlpCookies.trim();
+    payload.ytdlp_cookie_auto_sync_enabled = cookieAutoSyncEnabled;
+    payload.ytdlp_cookie_auto_sync_browser = cookieAutoSyncBrowser;
+    payload.ytdlp_cookie_auto_sync_interval_hours = cookieAutoSyncIntervalHours;
+    payload.ytdlp_cookie_auto_sync_on_sign_in = cookieAutoSyncOnSignIn;
     await onSaveAIConfig(payload);
     setGeminiKey('');
     setGroqKey('');
@@ -99,6 +121,15 @@ export default function SettingsView({
     } finally {
       setConnecting(false);
     }
+  };
+
+  const handleCookieIntervalChange = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+      setCookieAutoSyncIntervalHours(DEFAULT_COOKIE_INTERVAL_HOURS);
+      return;
+    }
+    setCookieAutoSyncIntervalHours(Math.max(1, parsed));
   };
 
   const canConnectYouTube = Boolean(youtubeStatus?.has_client_config || (ytClientId.trim() && ytClientSec.trim()));
@@ -364,7 +395,7 @@ export default function SettingsView({
                 YouTube Download Session
               </div>
               <p className={styles.subDesc}>
-                Paste Netscape-format <code>cookies.txt</code> content once to let the server download protected YouTube source videos.
+                Paste Netscape-format <code>cookies.txt</code> content once, or let ShortMaker import fresh YouTube cookies from your local browser automatically.
               </p>
               <label className={styles.keyLabel}>
                 Download Cookies
@@ -385,6 +416,88 @@ export default function SettingsView({
               <p className={styles.keyHint}>
                 Export this from a signed-in YouTube browser session. Existing stored cookies stay in place if you leave this blank.
               </p>
+
+              <div className={styles.cookieAutoSyncCard}>
+                <label className={styles.cookieAutoSyncToggle}>
+                  <input
+                    type="checkbox"
+                    checked={cookieAutoSyncEnabled}
+                    onChange={(e) => setCookieAutoSyncEnabled(e.target.checked)}
+                  />
+                  <span>Automatically import cookies from my local browser</span>
+                </label>
+
+                <div className={styles.cookieAutoSyncGrid}>
+                  <label className={styles.keyField}>
+                    <span className={styles.keyLabel}>Browser</span>
+                    <select
+                      value={cookieAutoSyncBrowser}
+                      onChange={(e) => setCookieAutoSyncBrowser(e.target.value as typeof DEFAULT_COOKIE_BROWSER)}
+                      disabled={!cookieAutoSyncEnabled}
+                    >
+                      <option value="chrome">Chrome</option>
+                      <option value="edge">Edge</option>
+                      <option value="firefox">Firefox</option>
+                      <option value="brave">Brave</option>
+                    </select>
+                  </label>
+
+                  <label className={styles.keyField}>
+                    <span className={styles.keyLabel}>Refresh Every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={cookieAutoSyncIntervalHours}
+                      onChange={(e) => handleCookieIntervalChange(e.target.value)}
+                      disabled={!cookieAutoSyncEnabled}
+                    />
+                  </label>
+                </div>
+
+                <label className={styles.cookieAutoSyncToggle}>
+                  <input
+                    type="checkbox"
+                    checked={cookieAutoSyncOnSignIn}
+                    onChange={(e) => setCookieAutoSyncOnSignIn(e.target.checked)}
+                    disabled={!cookieAutoSyncEnabled}
+                  />
+                  <span>Also refresh once after I sign in</span>
+                </label>
+
+                <div className={styles.cookieAutoSyncActions}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => { void onSyncYouTubeCookies('manual'); }}
+                    disabled={cookieSyncing}
+                  >
+                    {cookieSyncing ? (
+                      <><span className={`material-symbols-outlined ${styles.spinning}`}>autorenew</span>Syncing…</>
+                    ) : (
+                      <><span className="material-symbols-outlined">cookie</span>Sync From Browser Now</>
+                    )}
+                  </button>
+                </div>
+
+                <p className={styles.keyHint}>
+                  Automatic browser import works only when this ShortMaker backend runs on the same machine as your signed-in browser profile.
+                </p>
+                {!config.browser_cookie_import_supported && (
+                  <p className={styles.cookieAutoSyncError}>
+                    Browser cookie import support is not installed yet. Run the backend install step again after pulling this change.
+                  </p>
+                )}
+                {config.ytdlp_cookie_last_synced_at && (
+                  <p className={styles.cookieAutoSyncStatus}>
+                    Last synced {new Date(config.ytdlp_cookie_last_synced_at).toLocaleString()}
+                    {config.ytdlp_cookie_last_sync_status === 'success' ? ` from ${config.ytdlp_cookie_auto_sync_browser || DEFAULT_COOKIE_BROWSER}.` : '.'}
+                  </p>
+                )}
+                {config.ytdlp_cookie_last_sync_status === 'error' && config.ytdlp_cookie_last_sync_error && (
+                  <p className={styles.cookieAutoSyncError}>{config.ytdlp_cookie_last_sync_error}</p>
+                )}
+              </div>
             </div>
 
             <button type="submit" className={`btn btn-primary ${styles.saveBtn}`} disabled={saving}>

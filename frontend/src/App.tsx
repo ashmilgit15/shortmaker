@@ -87,6 +87,7 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
   const issuerMismatchDetectedAtRef = useRef<number | null>(null);
   const protectedPollInFlightRef = useRef(false);
   const authFailureNoticeRef = useRef(false);
+  const cookieLoginSyncAttemptedRef = useRef<string | null>(null);
   const hasWorkspaceAccess = isAdminConsoleRoute || isSignedIn;
   const expectedClerkIssuer = deriveIssuerFromPublishableKey(CLERK_PUBLISHABLE_KEY);
   const sessionIssuer = normalizeIssuer(String(sessionClaims?.iss || ''));
@@ -102,6 +103,7 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
   const [activeTab, setActiveTab] = useState<string>(isAdminConsoleRoute ? 'settings' : 'process');
   const [processing, setProcessing] = useState<boolean>(false);
   const [settingsSaving, setSettingsSaving] = useState<boolean>(false);
+  const [cookieSyncing, setCookieSyncing] = useState<boolean>(false);
   const [youtubeSaving, setYouTubeSaving] = useState<boolean>(false);
   const [backendSessionVerified, setBackendSessionVerified] = useState<boolean>(false);
   const [backendAuthMessage, setBackendAuthMessage] = useState<string | null>(null);
@@ -479,6 +481,12 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
     return () => clearInterval(interval);
   }, [fetchAdminConfig, fetchData, hasWorkspaceAccess, isLoaded]);
 
+  useEffect(() => {
+    if (!session?.user_id) {
+      cookieLoginSyncAttemptedRef.current = null;
+    }
+  }, [session?.user_id]);
+
   const handleProcess = useCallback(async (url: string, numClips: number) => {
     setProcessing(true);
     try {
@@ -680,6 +688,58 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
     }
   }, [authenticatedFetch, fetchAdminConfig, fetchData, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
 
+  const handleSyncYouTubeCookies = useCallback(async (reason: 'manual' | 'login' = 'manual') => {
+    setCookieSyncing(true);
+    try {
+      const requestInit: RequestInit = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      };
+      const res = isAdminConsoleRoute
+        ? await publicFetch('/youtube/cookies/sync', requestInit)
+        : await authenticatedFetch('/youtube/cookies/sync', requestInit);
+      const data = await readResponseBody(res, { endpoint: '/youtube/cookies/sync', expectJson: true });
+      if (res?.ok) {
+        if (data?.performed && reason === 'manual') {
+          showNotice('success', data?.message || 'YouTube cookies synced.');
+        }
+        if (!data?.performed && reason === 'manual') {
+          showNotice('info', data?.message || 'No cookie sync was needed.');
+        }
+        fetchAdminConfig();
+      } else if (reason === 'manual') {
+        showNotice('error', data?.detail || data?.message || 'Unable to sync YouTube cookies.');
+      }
+    } catch {
+      if (reason === 'manual') {
+        showNotice('error', 'Unable to sync YouTube cookies.');
+      }
+    } finally {
+      setCookieSyncing(false);
+    }
+  }, [authenticatedFetch, fetchAdminConfig, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
+
+  useEffect(() => {
+    if (isAdminConsoleRoute) return;
+    if (!backendSessionVerified || !session?.is_admin || !adminConfig?.ytdlp_cookie_auto_sync_on_sign_in) {
+      return;
+    }
+    const syncKey = session.user_id;
+    if (cookieLoginSyncAttemptedRef.current === syncKey) {
+      return;
+    }
+    cookieLoginSyncAttemptedRef.current = syncKey;
+    void handleSyncYouTubeCookies('login');
+  }, [
+    adminConfig?.ytdlp_cookie_auto_sync_on_sign_in,
+    backendSessionVerified,
+    handleSyncYouTubeCookies,
+    isAdminConsoleRoute,
+    session?.is_admin,
+    session?.user_id,
+  ]);
+
   const handleClipAccess = useCallback(async (filename: string, mode: 'open' | 'download' = 'open') => {
     try {
       const headers: HeadersInit = {};
@@ -793,14 +853,14 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
                   onOpenClip={handleClipAccess}
                 />
               )}
-                {activeTab === 'trends' && (
-                  <TrendsView
-                    apiFetch={trendsApiFetch}
-                    showNotice={showNotice}
-                    onProcessUrl={(url) => handleProcess(url, 5)}
-                    authReady={isAdminConsoleRoute || backendSessionVerified}
-                    authMessage={backendAuthMessage}
-                  />
+              {activeTab === 'trends' && (
+                <TrendsView
+                  apiFetch={trendsApiFetch}
+                  showNotice={showNotice}
+                  onProcessUrl={(url) => handleProcess(url, 5)}
+                  authReady={isAdminConsoleRoute || backendSessionVerified}
+                  authMessage={backendAuthMessage}
+                />
               )}
               {activeTab === 'settings' && (
                 <SettingsView
@@ -812,9 +872,11 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
                   onRetryAdminConfig={fetchAdminConfig}
                   onSaveAIConfig={handleSaveAIConfig}
                   onSaveYouTubeConfig={handleSaveYouTubeConfig}
+                  onSyncYouTubeCookies={handleSyncYouTubeCookies}
                   onConnectYouTube={handleConnectYouTube}
                   onDisconnectYouTube={handleDisconnectYouTube}
                   saving={settingsSaving}
+                  cookieSyncing={cookieSyncing}
                   youtubeSaving={youtubeSaving}
                 />
               )}
