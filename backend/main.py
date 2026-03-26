@@ -1920,11 +1920,8 @@ def _run_ytdlp_cookie_sync(reason: str) -> dict:
     return sync_cookies_with_status(reason=normalized_reason or "manual")
 
 
-@app.post("/youtube/cookies/sync")
-async def sync_youtube_cookies(
-    request: YouTubeCookieSyncRequest,
-    admin: ClerkUser = Depends(_require_admin_user),
-):
+@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/cookies/sync")
+async def admin_sync_youtube_cookies(request: YouTubeCookieSyncRequest):
     result = _run_ytdlp_cookie_sync(request.reason)
     status_code = 200 if result.get("ok", False) else 500
     if status_code != 200:
@@ -1932,8 +1929,117 @@ async def sync_youtube_cookies(
     return result
 
 
-@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/cookies/sync")
-async def admin_sync_youtube_cookies(request: YouTubeCookieSyncRequest):
+# ========================================
+# Cookie Config Endpoints (all authenticated users)
+# ========================================
+
+class CookieConfigRequest(BaseModel):
+    ytdlp_cookies: str = ""
+    ytdlp_cookie_auto_sync_enabled: Optional[bool] = None
+    ytdlp_cookie_auto_sync_browser: Optional[str] = None
+    ytdlp_cookie_auto_sync_interval_hours: Optional[int] = None
+    ytdlp_cookie_auto_sync_on_sign_in: Optional[bool] = None
+
+
+def _build_cookie_config_response() -> dict:
+    from .ai_engine import load_config
+    from .ytdlp_cookie_sync import browser_cookie_dependency_available, get_cookie_auto_sync_state
+
+    config = load_config()
+    cookie_sync_state = get_cookie_auto_sync_state(config)
+
+    return {
+        "has_ytdlp_cookies": bool(config.get("ytdlp_cookies_base64", "")),
+        "browser_cookie_import_supported": browser_cookie_dependency_available(),
+        **cookie_sync_state,
+    }
+
+
+def _apply_cookie_config(request: CookieConfigRequest) -> dict:
+    from .ai_engine import save_config, load_config
+    from .ytdlp_cookie_sync import (
+        get_cookie_auto_sync_state,
+        normalize_cookie_auto_sync_browser,
+        normalize_cookie_auto_sync_interval_hours,
+    )
+
+    existing = load_config()
+    existing_cookie_sync_state = get_cookie_auto_sync_state(existing)
+
+    auto_sync_enabled = (
+        request.ytdlp_cookie_auto_sync_enabled
+        if request.ytdlp_cookie_auto_sync_enabled is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_enabled"]
+    )
+    auto_sync_browser = normalize_cookie_auto_sync_browser(
+        request.ytdlp_cookie_auto_sync_browser
+        if request.ytdlp_cookie_auto_sync_browser is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_browser"]
+    )
+    auto_sync_interval_hours = normalize_cookie_auto_sync_interval_hours(
+        request.ytdlp_cookie_auto_sync_interval_hours
+        if request.ytdlp_cookie_auto_sync_interval_hours is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_interval_hours"]
+    )
+    auto_sync_on_sign_in = (
+        request.ytdlp_cookie_auto_sync_on_sign_in
+        if request.ytdlp_cookie_auto_sync_on_sign_in is not None
+        else existing_cookie_sync_state["ytdlp_cookie_auto_sync_on_sign_in"]
+    )
+
+    merged = existing.copy()
+    if request.ytdlp_cookies.strip():
+        _assert_secret_storage_ready(request.ytdlp_cookies)
+        merged["ytdlp_cookies_base64"] = base64.b64encode(
+            request.ytdlp_cookies.encode("utf-8")
+        ).decode("utf-8")
+    merged["ytdlp_cookie_auto_sync_enabled"] = auto_sync_enabled
+    merged["ytdlp_cookie_auto_sync_browser"] = auto_sync_browser
+    merged["ytdlp_cookie_auto_sync_interval_hours"] = auto_sync_interval_hours
+    merged["ytdlp_cookie_auto_sync_on_sign_in"] = auto_sync_on_sign_in
+
+    save_config(merged)
+
+    return {
+        "success": True,
+        "has_ytdlp_cookies": bool(merged.get("ytdlp_cookies_base64", "")),
+        "ytdlp_cookie_auto_sync_enabled": auto_sync_enabled,
+        "ytdlp_cookie_auto_sync_browser": auto_sync_browser,
+        "ytdlp_cookie_auto_sync_interval_hours": auto_sync_interval_hours,
+        "ytdlp_cookie_auto_sync_on_sign_in": auto_sync_on_sign_in,
+        "message": "Cookie settings saved.",
+    }
+
+
+@app.get("/youtube/cookies/config")
+async def get_cookie_config(user: ClerkUser = Depends(_require_app_user)):
+    return _build_cookie_config_response()
+
+
+@app.post("/youtube/cookies/config")
+async def set_cookie_config(
+    request: CookieConfigRequest,
+    user: ClerkUser = Depends(_require_app_user),
+):
+    return _apply_cookie_config(request)
+
+
+@app.get(f"{ADMIN_ROUTE_PREFIX}/youtube/cookies/config")
+async def admin_get_cookie_config():
+    return _build_cookie_config_response()
+
+
+@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/cookies/config")
+async def admin_set_cookie_config(request: CookieConfigRequest):
+    return _apply_cookie_config(request)
+
+
+# Downgrade cookie sync from admin-only to any authenticated user
+@app.post("/youtube/cookies/sync")
+async def sync_youtube_cookies(
+    request: YouTubeCookieSyncRequest,
+    user: ClerkUser = Depends(_require_app_user),
+):
     result = _run_ytdlp_cookie_sync(request.reason)
     status_code = 200 if result.get("ok", False) else 500
     if status_code != 200:

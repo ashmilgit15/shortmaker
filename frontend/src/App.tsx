@@ -436,7 +436,7 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
   }, [hasWorkspaceAccess]);
 
   const fetchAdminConfig = useCallback(async () => {
-    if (!isAdminConsoleRoute && (!isSignedIn || !session?.is_admin)) {
+    if (!isAdminConsoleRoute && !isSignedIn) {
       setAdminConfig(null);
       setAdminConfigError(null);
       return;
@@ -446,32 +446,46 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
       if (!isAdminConsoleRoute && !token) {
         return;
       }
-      const res = isAdminConsoleRoute
-        ? await publicFetch('/ai/config')
-        : await authenticatedFetch('/ai/config', {}, token);
-      if (await handleProtectedAuthFailure(res)) {
-        return;
-      }
-      if (res?.ok) {
-        const configPayload = await readResponseBody(res, { endpoint: '/ai/config', expectJson: true });
-        if (configPayload) {
-          setAdminConfig(configPayload as AdminConfig);
-          setAdminConfigError(null);
-          issuerMismatchDetectedAtRef.current = null;
-          issuerMismatchHandledRef.current = false;
+
+      // Admin users get the full config; non-admin users get cookie config only
+      if (isAdminConsoleRoute || session?.is_admin) {
+        const res = isAdminConsoleRoute
+          ? await publicFetch('/ai/config')
+          : await authenticatedFetch('/ai/config', {}, token);
+        if (await handleProtectedAuthFailure(res)) {
+          return;
         }
-      } else if (res?.status === 403) {
-        setAdminConfig(null);
-        setAdminConfigError('This account is signed in but is not allowed to access admin settings on the server.');
+        if (res?.ok) {
+          const configPayload = await readResponseBody(res, { endpoint: '/ai/config', expectJson: true });
+          if (configPayload) {
+            setAdminConfig(configPayload as AdminConfig);
+            setAdminConfigError(null);
+            issuerMismatchDetectedAtRef.current = null;
+            issuerMismatchHandledRef.current = false;
+          }
+          return;
+        }
+      }
+
+      // Non-admin users (or admin config 403): fetch cookie config from the lighter endpoint
+      const cookieRes = isAdminConsoleRoute
+        ? await publicFetch('/youtube/cookies/config')
+        : await authenticatedFetch('/youtube/cookies/config', {}, token);
+      if (cookieRes?.ok) {
+        const cookiePayload = await readResponseBody(cookieRes, { endpoint: '/youtube/cookies/config', expectJson: true });
+        if (cookiePayload) {
+          setAdminConfig(cookiePayload as AdminConfig);
+          setAdminConfigError(null);
+        }
       } else {
         setAdminConfig(null);
-        setAdminConfigError(await extractErrorMessage(res, 'Failed to load admin settings.'));
+        setAdminConfigError(null);
       }
     } catch {
       setAdminConfig(null);
-      setAdminConfigError('Failed to load admin settings.');
+      setAdminConfigError(null);
     }
-  }, [authenticatedFetch, extractErrorMessage, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
+  }, [authenticatedFetch, getBearerToken, handleProtectedAuthFailure, isAdminConsoleRoute, isSignedIn, publicFetch, readResponseBody, session?.is_admin]);
 
   useEffect(() => {
     if (!isLoaded || !hasWorkspaceAccess) return;
@@ -670,10 +684,13 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       };
+      const isAdmin = isAdminConsoleRoute || !!session?.is_admin;
+      // Admin users save to /ai/config (full config); non-admin users save cookies via /youtube/cookies/config
+      const endpoint = isAdmin ? '/ai/config' : '/youtube/cookies/config';
       const res = isAdminConsoleRoute
-        ? await publicFetch('/ai/config', requestInit)
-        : await authenticatedFetch('/ai/config', requestInit);
-      const data = await readResponseBody(res, { endpoint: '/ai/config', expectJson: true });
+        ? await publicFetch(endpoint, requestInit)
+        : await authenticatedFetch(endpoint, requestInit);
+      const data = await readResponseBody(res, { endpoint, expectJson: true });
       if (res?.ok) {
         showNotice('success', data?.message || 'Settings saved!');
         fetchAdminConfig();
@@ -686,7 +703,7 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
     } finally {
       setSettingsSaving(false);
     }
-  }, [authenticatedFetch, fetchAdminConfig, fetchData, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
+  }, [authenticatedFetch, fetchAdminConfig, fetchData, isAdminConsoleRoute, publicFetch, readResponseBody, session?.is_admin, showNotice]);
 
   const handleSyncYouTubeCookies = useCallback(async (reason: 'manual' | 'login' = 'manual') => {
     setCookieSyncing(true);
@@ -722,7 +739,7 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
 
   useEffect(() => {
     if (isAdminConsoleRoute) return;
-    if (!backendSessionVerified || !session?.is_admin || !adminConfig?.ytdlp_cookie_auto_sync_on_sign_in) {
+    if (!backendSessionVerified || !adminConfig?.ytdlp_cookie_auto_sync_on_sign_in) {
       return;
     }
     const syncKey = session.user_id;

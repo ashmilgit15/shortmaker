@@ -239,13 +239,13 @@ def download_video(url: str, output_dir: str) -> dict:
             except yt_dlp.utils.DownloadError as exc:
                 last_error = exc
                 message = str(exc)
-                if "Sign in to confirm you’re not a bot" in message or "Sign in to confirm you're not a bot" in message:
+                if "Sign in to confirm you’re not a bot" in message or "sign in to confirm" in message.lower():
                     pot_provider = os.environ.get(YTDLP_POT_PROVIDER_ENV, "").strip() or "disabled"
                     raise RuntimeError(
-                        "YouTube blocked this download. Configure Netscape-format YouTube cookies via "
-                        f"{YTDLP_COOKIE_FILE_ENV}, {YTDLP_COOKIE_TEXT_ENV}, or {YTDLP_COOKIE_BASE64_ENV}. "
-                        f"If cookies are already configured, ensure the PO token provider is available "
-                        f"(current: {pot_provider})."
+                        "YouTube blocked this download because it could not verify your session. "
+                        "Go to Settings → YouTube Download Session and either paste fresh cookies "
+                        "from your browser or click ‘Sync From Browser Now’. "
+                        f"(PO token provider: {pot_provider})"
                     ) from exc
                 if "Requested format is not available" in message:
                     print(
