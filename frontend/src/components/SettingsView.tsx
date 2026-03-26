@@ -57,16 +57,18 @@ export default function SettingsView({
   }, [youtubeStatus?.default_privacy_status]);
 
   useEffect(() => {
-    if (!config || !isAdmin) return;
-    setGeminiKey(config.gemini_api_key || '');
-    setGroqKey(config.groq_api_key || '');
-    setFirecrawlKey(config.firecrawl_api_key || '');
-    setYtClientId(config.youtube_client_id || '');
-    setYtClientSec(config.youtube_client_secret || '');
+    if (!config) return;
     setCookieAutoSyncEnabled(Boolean(config.ytdlp_cookie_auto_sync_enabled));
     setCookieAutoSyncBrowser(config.ytdlp_cookie_auto_sync_browser || DEFAULT_COOKIE_BROWSER);
     setCookieAutoSyncIntervalHours(config.ytdlp_cookie_auto_sync_interval_hours || DEFAULT_COOKIE_INTERVAL_HOURS);
     setCookieAutoSyncOnSignIn(Boolean(config.ytdlp_cookie_auto_sync_on_sign_in));
+    if (isAdmin) {
+      setGeminiKey(config.gemini_api_key || '');
+      setGroqKey(config.groq_api_key || '');
+      setFirecrawlKey(config.firecrawl_api_key || '');
+      setYtClientId(config.youtube_client_id || '');
+      setYtClientSec(config.youtube_client_secret || '');
+    }
   }, [
     config?.firecrawl_api_key,
     config?.gemini_api_key,
@@ -77,6 +79,7 @@ export default function SettingsView({
     config?.ytdlp_cookie_auto_sync_on_sign_in,
     config?.youtube_client_id,
     config?.youtube_client_secret,
+    config,
     isAdmin,
   ]);
 
@@ -84,22 +87,28 @@ export default function SettingsView({
     ? Math.max(0, Math.min(100, Math.round((session.usage.used / Math.max(session.usage.limit, 1)) * 100)))
     : 0;
 
-  const handleSaveAdmin = async (e: React.FormEvent) => {
+  const handleSaveCookies = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload: Record<string, string | boolean | number> = {};
-    if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim();
-    if (groqKey.trim()) payload.groq_api_key = groqKey.trim();
-    if (firecrawlKey.trim()) payload.firecrawl_api_key = firecrawlKey.trim();
     if (ytdlpCookies.trim()) payload.ytdlp_cookies = ytdlpCookies.trim();
     payload.ytdlp_cookie_auto_sync_enabled = cookieAutoSyncEnabled;
     payload.ytdlp_cookie_auto_sync_browser = cookieAutoSyncBrowser;
     payload.ytdlp_cookie_auto_sync_interval_hours = cookieAutoSyncIntervalHours;
     payload.ytdlp_cookie_auto_sync_on_sign_in = cookieAutoSyncOnSignIn;
     await onSaveAIConfig(payload);
+    setYtdlpCookies('');
+  };
+
+  const handleSaveAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload: Record<string, string | boolean | number> = {};
+    if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim();
+    if (groqKey.trim()) payload.groq_api_key = groqKey.trim();
+    if (firecrawlKey.trim()) payload.firecrawl_api_key = firecrawlKey.trim();
+    await onSaveAIConfig(payload);
     setGeminiKey('');
     setGroqKey('');
     setFirecrawlKey('');
-    setYtdlpCookies('');
   };
 
   const handleSaveYouTube = async (e: React.FormEvent) => {
@@ -348,129 +357,127 @@ export default function SettingsView({
         )}
       </div>
 
-      {(isAdmin || config) && (
-        <form onSubmit={handleSaveAdmin} className={`card ${styles.section}`}>
-          <div className={styles.sectionHead}>
-            <span className={`material-symbols-outlined ${styles.sectionIcon} ${styles.iconYt}`}>cookie</span>
-            <div>
-              <h3 className={styles.sectionTitle}>YouTube Download Session</h3>
-              <p className={styles.sectionDesc}>
-                YouTube may block downloads without valid cookies. Paste a <code>cookies.txt</code> or sync from your browser to keep downloads working.
-              </p>
-            </div>
+      <form onSubmit={handleSaveCookies} className={`card ${styles.section}`}>
+        <div className={styles.sectionHead}>
+          <span className={`material-symbols-outlined ${styles.sectionIcon} ${styles.iconYt}`}>cookie</span>
+          <div>
+            <h3 className={styles.sectionTitle}>YouTube Download Session</h3>
+            <p className={styles.sectionDesc}>
+              YouTube may block downloads without valid cookies. Paste a <code>cookies.txt</code> or sync from your browser to keep downloads working.
+            </p>
           </div>
+        </div>
 
-          <label className={styles.keyLabel}>
-            Download Cookies
-            {config?.has_ytdlp_cookies && (
-              <span className={styles.keySetBadge}>
-                <span className={`material-symbols-outlined ${styles.keySetIcon}`}>check</span>
-                Set
-              </span>
-            )}
+        <label className={styles.keyLabel}>
+          Download Cookies
+          {config?.has_ytdlp_cookies && (
+            <span className={styles.keySetBadge}>
+              <span className={`material-symbols-outlined ${styles.keySetIcon}`}>check</span>
+              Set
+            </span>
+          )}
+        </label>
+        <textarea
+          className={styles.cookiesArea}
+          placeholder={config?.has_ytdlp_cookies ? 'Stored securely. Paste new cookies here only when you need to refresh them.' : '# Netscape HTTP Cookie File'}
+          value={ytdlpCookies}
+          onChange={(e) => setYtdlpCookies(e.target.value)}
+          spellCheck={false}
+        />
+        <p className={styles.keyHint}>
+          Export this from a signed-in YouTube browser session. Existing stored cookies stay in place if you leave this blank.
+        </p>
+
+        <div className={styles.cookieAutoSyncCard}>
+          <label className={styles.cookieAutoSyncToggle}>
+            <input
+              type="checkbox"
+              checked={cookieAutoSyncEnabled}
+              onChange={(e) => setCookieAutoSyncEnabled(e.target.checked)}
+            />
+            <span>Automatically import cookies from my local browser</span>
           </label>
-          <textarea
-            className={styles.cookiesArea}
-            placeholder={config?.has_ytdlp_cookies ? ‘Stored securely. Paste new cookies here only when you need to refresh them.’ : ‘# Netscape HTTP Cookie File\n# Export from a browser extension like "Get cookies.txt LOCALLY" while signed into YouTube.’}
-            value={ytdlpCookies}
-            onChange={(e) => setYtdlpCookies(e.target.value)}
-            spellCheck={false}
-          />
-          <p className={styles.keyHint}>
-            Export this from a signed-in YouTube browser session. Existing stored cookies stay in place if you leave this blank.
-          </p>
 
-          <div className={styles.cookieAutoSyncCard}>
-            <label className={styles.cookieAutoSyncToggle}>
-              <input
-                type="checkbox"
-                checked={cookieAutoSyncEnabled}
-                onChange={(e) => setCookieAutoSyncEnabled(e.target.checked)}
-              />
-              <span>Automatically import cookies from my local browser</span>
+          <div className={styles.cookieAutoSyncGrid}>
+            <label className={styles.keyField}>
+              <span className={styles.keyLabel}>Browser</span>
+              <select
+                value={cookieAutoSyncBrowser}
+                onChange={(e) => setCookieAutoSyncBrowser(e.target.value as typeof DEFAULT_COOKIE_BROWSER)}
+                disabled={!cookieAutoSyncEnabled}
+              >
+                <option value="chrome">Chrome</option>
+                <option value="edge">Edge</option>
+                <option value="firefox">Firefox</option>
+                <option value="brave">Brave</option>
+              </select>
             </label>
 
-            <div className={styles.cookieAutoSyncGrid}>
-              <label className={styles.keyField}>
-                <span className={styles.keyLabel}>Browser</span>
-                <select
-                  value={cookieAutoSyncBrowser}
-                  onChange={(e) => setCookieAutoSyncBrowser(e.target.value as typeof DEFAULT_COOKIE_BROWSER)}
-                  disabled={!cookieAutoSyncEnabled}
-                >
-                  <option value="chrome">Chrome</option>
-                  <option value="edge">Edge</option>
-                  <option value="firefox">Firefox</option>
-                  <option value="brave">Brave</option>
-                </select>
-              </label>
-
-              <label className={styles.keyField}>
-                <span className={styles.keyLabel}>Refresh Every</span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={cookieAutoSyncIntervalHours}
-                  onChange={(e) => handleCookieIntervalChange(e.target.value)}
-                  disabled={!cookieAutoSyncEnabled}
-                />
-              </label>
-            </div>
-
-            <label className={styles.cookieAutoSyncToggle}>
+            <label className={styles.keyField}>
+              <span className={styles.keyLabel}>Refresh Every</span>
               <input
-                type="checkbox"
-                checked={cookieAutoSyncOnSignIn}
-                onChange={(e) => setCookieAutoSyncOnSignIn(e.target.checked)}
+                type="number"
+                min={1}
+                step={1}
+                value={cookieAutoSyncIntervalHours}
+                onChange={(e) => handleCookieIntervalChange(e.target.value)}
                 disabled={!cookieAutoSyncEnabled}
               />
-              <span>Also refresh once after I sign in</span>
             </label>
-
-            <div className={styles.cookieAutoSyncActions}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => { void onSyncYouTubeCookies(‘manual’); }}
-                disabled={cookieSyncing}
-              >
-                {cookieSyncing ? (
-                  <><span className={`material-symbols-outlined ${styles.spinning}`}>autorenew</span>Syncing…</>
-                ) : (
-                  <><span className="material-symbols-outlined">cookie</span>Sync From Browser Now</>
-                )}
-              </button>
-            </div>
-
-            <p className={styles.keyHint}>
-              Automatic browser import works only when this ShortMaker backend runs on the same machine as your signed-in browser profile.
-            </p>
-            {config && !config.browser_cookie_import_supported && (
-              <p className={styles.cookieAutoSyncError}>
-                Browser cookie import support is not installed yet. Run the backend install step again after pulling this change.
-              </p>
-            )}
-            {config?.ytdlp_cookie_last_synced_at && (
-              <p className={styles.cookieAutoSyncStatus}>
-                Last synced {new Date(config.ytdlp_cookie_last_synced_at).toLocaleString()}
-                {config.ytdlp_cookie_last_sync_status === ‘success’ ? ` from ${config.ytdlp_cookie_auto_sync_browser || DEFAULT_COOKIE_BROWSER}.` : ‘.’}
-              </p>
-            )}
-            {config?.ytdlp_cookie_last_sync_status === ‘error’ && config?.ytdlp_cookie_last_sync_error && (
-              <p className={styles.cookieAutoSyncError}>{config.ytdlp_cookie_last_sync_error}</p>
-            )}
           </div>
 
-          <button type="submit" className={`btn btn-primary ${styles.saveBtn}`} disabled={saving}>
-            {saving ? (
-              <><span className={`material-symbols-outlined ${styles.spinning}`}>autorenew</span>Saving…</>
-            ) : (
-              <><span className="material-symbols-outlined">save</span>Save Cookie Settings</>
-            )}
-          </button>
-        </form>
-      )}
+          <label className={styles.cookieAutoSyncToggle}>
+            <input
+              type="checkbox"
+              checked={cookieAutoSyncOnSignIn}
+              onChange={(e) => setCookieAutoSyncOnSignIn(e.target.checked)}
+              disabled={!cookieAutoSyncEnabled}
+            />
+            <span>Also refresh once after I sign in</span>
+          </label>
+
+          <div className={styles.cookieAutoSyncActions}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => { void onSyncYouTubeCookies('manual'); }}
+              disabled={cookieSyncing}
+            >
+              {cookieSyncing ? (
+                <><span className={`material-symbols-outlined ${styles.spinning}`}>autorenew</span>Syncing…</>
+              ) : (
+                <><span className="material-symbols-outlined">cookie</span>Sync From Browser Now</>
+              )}
+            </button>
+          </div>
+
+          <p className={styles.keyHint}>
+            Automatic browser import works only when this ShortMaker backend runs on the same machine as your signed-in browser profile.
+          </p>
+          {config && !config.browser_cookie_import_supported && (
+            <p className={styles.cookieAutoSyncError}>
+              Browser cookie import support is not installed yet. Run the backend install step again after pulling this change.
+            </p>
+          )}
+          {config?.ytdlp_cookie_last_synced_at && (
+            <p className={styles.cookieAutoSyncStatus}>
+              Last synced {new Date(config.ytdlp_cookie_last_synced_at).toLocaleString()}
+              {config.ytdlp_cookie_last_sync_status === 'success' ? ` from ${config.ytdlp_cookie_auto_sync_browser || DEFAULT_COOKIE_BROWSER}.` : '.'}
+            </p>
+          )}
+          {config?.ytdlp_cookie_last_sync_status === 'error' && config?.ytdlp_cookie_last_sync_error && (
+            <p className={styles.cookieAutoSyncError}>{config.ytdlp_cookie_last_sync_error}</p>
+          )}
+        </div>
+
+        <button type="submit" className={`btn btn-primary ${styles.saveBtn}`} disabled={saving}>
+          {saving ? (
+            <><span className={`material-symbols-outlined ${styles.spinning}`}>autorenew</span>Saving…</>
+          ) : (
+            <><span className="material-symbols-outlined">save</span>Save Cookie Settings</>
+          )}
+        </button>
+      </form>
 
       {isAdmin && config && (
         <>
@@ -527,7 +534,7 @@ export default function SettingsView({
               <span className={`material-symbols-outlined ${styles.sectionIcon} ${styles.iconGreen}`}>tune</span>
               <div>
                 <h3 className={styles.sectionTitle}>Capabilities</h3>
-                <p className={styles.sectionDesc}>Current workspace AI features and the current user’s YouTube connection status.</p>
+                <p className={styles.sectionDesc}>Current workspace AI features and the current user{"'"}s YouTube connection status.</p>
               </div>
             </div>
             <div className={styles.capsGrid}>

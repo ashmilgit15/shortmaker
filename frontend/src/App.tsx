@@ -739,7 +739,7 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
 
   useEffect(() => {
     if (isAdminConsoleRoute) return;
-    if (!backendSessionVerified || !adminConfig?.ytdlp_cookie_auto_sync_on_sign_in) {
+    if (!backendSessionVerified || !session || !adminConfig?.ytdlp_cookie_auto_sync_on_sign_in) {
       return;
     }
     const syncKey = session.user_id;
