@@ -2305,9 +2305,16 @@ def _build_cookie_config_response() -> dict:
     from .ytdlp_cookie_sync import (
         browser_cookie_dependency_available,
         get_cookie_auto_sync_state,
-        _playwright_available,
-        _is_firefox_available,
     )
+
+    try:
+        from .ytdlp_cookie_sync import (
+            _playwright_available,
+            _is_firefox_available,
+        )
+    except ImportError:
+        _playwright_available = lambda: False
+        _is_firefox_available = lambda: False
 
     config = load_config()
     cookie_sync_state = get_cookie_auto_sync_state(config)
