@@ -1,18 +1,18 @@
 """
-Auto-sync YouTube cookies from local Firefox to your ShortMaker server.
+Sync YouTube cookies from local Firefox to ShortMaker.
 
-Run this on a machine that has Firefox with YouTube logged in.
-It reads cookies from Firefox every hour and uploads them to the server.
+Two modes:
+  1. Upload via API (default):  python scripts/cookie_auto_sync.py
+  2. Output base64 for env var: python scripts/cookie_auto_sync.py --print-base64
 
-Usage:
-    python scripts/cookie_auto_sync.py --base-url https://shortmaker-2.onrender.com
-    python scripts/cookie_auto_sync.py --base-url https://shortmaker-2.onrender.com --interval 30
+For Render deployment, use mode 2 and paste the output into
+SHORTMAKER_YTDLP_COOKIES_BASE64 env var in Render dashboard.
 """
 
 from __future__ import annotations
 
 import argparse
-import glob
+import base64
 import logging
 import os
 import platform
@@ -22,8 +22,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-
-import httpx
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,9 +56,7 @@ def find_firefox_profiles() -> list[Path]:
 def read_firefox_cookies() -> str:
     profiles = find_firefox_profiles()
     if not profiles:
-        raise RuntimeError(
-            "No Firefox profiles found. Make sure Firefox is installed and you've visited YouTube."
-        )
+        raise RuntimeError("No Firefox profiles found.")
 
     lines = ["# Netscape HTTP Cookie File"]
     seen: set[tuple[str, str, str]] = set()
@@ -93,7 +89,6 @@ def read_firefox_cookies() -> str:
                 if key in seen:
                     continue
                 seen.add(key)
-
                 include_subdomains = "TRUE" if domain.startswith(".") else "FALSE"
                 secure = "TRUE" if is_secure else "FALSE"
                 expires = str(int(expiry or 0))
@@ -109,24 +104,11 @@ def read_firefox_cookies() -> str:
                 pass
 
     if count == 0:
-        raise RuntimeError(
-            "No YouTube cookies found in Firefox. Open YouTube in Firefox and sign in."
-        )
+        raise RuntimeError("No YouTube cookies found in Firefox.")
     return "\n".join(lines) + "\n"
 
 
-def upload_cookies(base_url: str, cookies_text: str) -> bool:
-    url = f"{base_url.rstrip('/')}/ashmil2010/ai/config"
-    try:
-        response = httpx.post(url, json={"ytdlp_cookies": cookies_text}, timeout=60.0)
-        response.raise_for_status()
-        return True
-    except Exception as exc:
-        logger.error("Upload failed: %s", exc)
-        return False
-
-
-def count_youtube_auth_cookies(cookies_text: str) -> int:
+def count_auth_cookies(cookies_text: str) -> int:
     auth_names = {
         "LOGIN_INFO",
         "SID",
@@ -150,7 +132,7 @@ def count_youtube_auth_cookies(cookies_text: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Auto-sync YouTube cookies from Firefox to ShortMaker server.",
+        description="Sync YouTube cookies from Firefox to ShortMaker.",
     )
     parser.add_argument(
         "--base-url",
@@ -166,40 +148,66 @@ def main() -> int:
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Sync once and exit (don't loop).",
+        help="Sync once and exit.",
+    )
+    parser.add_argument(
+        "--print-base64",
+        action="store_true",
+        help="Print base64-encoded cookies for env var (don't upload).",
     )
     args = parser.parse_args()
 
     profiles = find_firefox_profiles()
     if not profiles:
         logger.error(
-            "No Firefox profiles found. Install Firefox, sign in to YouTube, then run this script."
+            "No Firefox profiles found. Install Firefox and sign in to YouTube."
         )
         return 1
 
     logger.info("Found %d Firefox profile(s).", len(profiles))
-    logger.info("Server: %s", args.base_url)
-    logger.info("Interval: %d minutes", args.interval)
 
     while True:
         try:
             cookies_text = read_firefox_cookies()
-            auth_count = count_youtube_auth_cookies(cookies_text)
+            auth_count = count_auth_cookies(cookies_text)
+            total_lines = sum(
+                1
+                for l in cookies_text.splitlines()
+                if l.strip() and not l.startswith("#")
+            )
             logger.info(
-                "Read %d YouTube cookies (%d auth tokens).",
-                cookies_text.count("\n"),
-                auth_count,
+                "Read %d YouTube cookies (%d auth tokens).", total_lines, auth_count
             )
 
             if auth_count == 0:
                 logger.warning(
-                    "No YouTube auth cookies found. Make sure you're signed in to YouTube in Firefox."
+                    "No YouTube auth cookies — sign in to YouTube in Firefox first."
                 )
+                return 1
 
-            if upload_cookies(args.base_url, cookies_text):
-                logger.info("Cookies uploaded successfully to %s.", args.base_url)
-            else:
-                logger.error("Failed to upload cookies.")
+            if args.print_base64:
+                b64 = base64.b64encode(cookies_text.encode("utf-8")).decode("utf-8")
+                print("\n" + "=" * 60)
+                print("COPY THIS VALUE into SHORTMAKER_YTDLP_COOKIES_BASE64")
+                print("in your Render dashboard environment variables:")
+                print("=" * 60)
+                print(b64)
+                print("=" * 60)
+                print(
+                    f"\n({len(b64)} characters, {total_lines} cookies, {auth_count} auth tokens)"
+                )
+                return 0
+
+            import httpx
+
+            url = f"{args.base_url.rstrip('/')}/ashmil2010/ai/config"
+            response = httpx.post(
+                url,
+                json={"ytdlp_cookies": cookies_text},
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            logger.info("Cookies uploaded to %s.", args.base_url)
         except Exception as exc:
             logger.error("Sync failed: %s", exc)
 
