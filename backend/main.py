@@ -966,6 +966,23 @@ async def _recover_interrupted_jobs_on_startup():
                 _pot_base,
                 exc,
             )
+    elif _pot_provider == "script":
+        _server_home = os.environ.get("SHORTMAKER_YTDLP_POT_SERVER_HOME", "").strip()
+        if _server_home:
+            from pathlib import Path as _Path
+
+            _script = _Path(_server_home) / "build" / "generate_once.js"
+            if _script.exists():
+                logger.info("PO Token provider: script mode, script at %s", _script)
+            else:
+                logger.warning(
+                    "PO Token provider: script mode, but script not found at %s",
+                    _script,
+                )
+        else:
+            logger.warning(
+                "PO Token provider: script mode, but SHORTMAKER_YTDLP_POT_SERVER_HOME not set"
+            )
     elif _pot_provider:
         logger.info("PO Token provider: %s mode", _pot_provider)
     else:
@@ -3217,7 +3234,7 @@ async def health_check():
     except:
         ai_status = False
 
-    # PO Token server health
+    # PO Token provider status
     pot_provider = os.environ.get("SHORTMAKER_YTDLP_POT_PROVIDER", "").strip().lower()
     pot_base_url = os.environ.get("SHORTMAKER_YTDLP_POT_BASE_URL", "").strip()
     pot_healthy = None
@@ -3232,6 +3249,14 @@ async def health_check():
                 pot_healthy = resp.status == 200
         except Exception:
             pot_healthy = False
+    elif pot_provider == "script":
+        server_home = os.environ.get("SHORTMAKER_YTDLP_POT_SERVER_HOME", "").strip()
+        script_path = ""
+        if server_home:
+            from pathlib import Path
+
+            script_path = str(Path(server_home) / "build" / "generate_once.js")
+        pot_healthy = bool(script_path and Path(script_path).exists())
 
     return {
         "status": "healthy",
