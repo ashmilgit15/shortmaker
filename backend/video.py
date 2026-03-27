@@ -462,6 +462,8 @@ def download_video(url: str, output_dir: str) -> dict:
                 ):
                     # Try alternative player clients before giving up
                     _clear_partial_downloads(output_dir, info["id"])
+
+                    # Round 1: Try fallback clients WITH PO Token provider
                     fallback_clients = [
                         "tv_embedded",
                         "android_vr",
@@ -493,6 +495,42 @@ def download_video(url: str, output_dir: str) -> dict:
                             break
                         except yt_dlp.utils.DownloadError:
                             continue
+
+                    # Round 2: Nuclear fallback — try embedded clients WITHOUT
+                    # any PO Token provider (some work without tokens)
+                    if not bot_bypassed:
+                        bare_clients = ["tv_embedded", "android_embedded"]
+                        for client_name in bare_clients:
+                            logger.info(
+                                "Bot detection still active — "
+                                "trying bare %s client (no PO Token)...",
+                                client_name,
+                            )
+                            retry_opts = {
+                                **candidate_opts,
+                                "extractor_args": {
+                                    "youtube": {"player_client": [client_name]}
+                                },
+                            }
+                            # Remove PO Token extractor args for bare retry
+                            retry_opts.pop("extractor_args", None)
+                            retry_opts["extractor_args"] = {
+                                "youtube": {"player_client": [client_name]}
+                            }
+                            try:
+                                _clear_partial_downloads(output_dir, info["id"])
+                                with yt_dlp.YoutubeDL(retry_opts) as ydl:
+                                    ydl.download([url])
+                                logger.info(
+                                    "Bot detection bypassed using bare %s client!",
+                                    client_name,
+                                )
+                                bot_bypassed = True
+                                last_error = None
+                                break
+                            except yt_dlp.utils.DownloadError:
+                                continue
+
                     if bot_bypassed:
                         break
                     # All fallback clients failed — raise with diagnostic info

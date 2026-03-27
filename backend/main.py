@@ -940,6 +940,47 @@ async def _recover_interrupted_jobs_on_startup():
         logger.warning(
             "No admin allowlist configured. Admin routes are disabled until SHORTMAKER_ADMIN_USER_IDS or SHORTMAKER_ADMIN_EMAILS is set."
         )
+
+    # Log PO Token provider configuration
+    _pot_provider = os.environ.get("SHORTMAKER_YTDLP_POT_PROVIDER", "").strip().lower()
+    _pot_base = os.environ.get("SHORTMAKER_YTDLP_POT_BASE_URL", "").strip()
+    if _pot_provider == "http" and _pot_base:
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(_pot_base.rstrip("/") + "/ping", method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    logger.info(
+                        "PO Token provider: HTTP mode, server healthy at %s", _pot_base
+                    )
+                else:
+                    logger.warning(
+                        "PO Token provider: HTTP mode, server at %s returned %d",
+                        _pot_base,
+                        resp.status,
+                    )
+        except Exception as exc:
+            logger.warning(
+                "PO Token provider: HTTP mode, server at %s unreachable: %s",
+                _pot_base,
+                exc,
+            )
+    elif _pot_provider:
+        logger.info("PO Token provider: %s mode", _pot_provider)
+    else:
+        logger.warning(
+            "No PO Token provider configured — "
+            "downloads may be blocked by YouTube bot detection on datacenter IPs."
+        )
+
+    # Log cookie status
+    _cookies_b64 = os.environ.get("SHORTMAKER_YTDLP_COOKIES_BASE64", "").strip()
+    if _cookies_b64:
+        logger.info("YouTube cookies: configured via env var")
+    else:
+        logger.info("YouTube cookies: not set (using PO Token only)")
+
     init_database()
     recover_incomplete_jobs()
     ensure_cookie_auto_sync_worker_started()
@@ -3169,11 +3210,29 @@ async def health_check():
     except:
         ai_status = False
 
+    # PO Token server health
+    pot_provider = os.environ.get("SHORTMAKER_YTDLP_POT_PROVIDER", "").strip().lower()
+    pot_base_url = os.environ.get("SHORTMAKER_YTDLP_POT_BASE_URL", "").strip()
+    pot_healthy = None
+    if pot_provider == "http" and pot_base_url:
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(
+                pot_base_url.rstrip("/") + "/ping", method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                pot_healthy = resp.status == 200
+        except Exception:
+            pot_healthy = False
+
     return {
         "status": "healthy",
         "version": "3.0.0",
         "ai_enabled": ai_status,
         "database_enabled": database_enabled(),
+        "pot_provider": pot_provider or "disabled",
+        "pot_healthy": pot_healthy,
     }
 
 
