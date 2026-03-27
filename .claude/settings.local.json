@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd \"C:\\\\Users\\\\Ashmil P\\\\desktop\\\\shortmaker\\\\frontend\" && npm run build 2>&1)"
+      "Bash(cd \"C:\\\\Users\\\\Ashmil P\\\\desktop\\\\shortmaker\\\\frontend\" && npm run build 2>&1)",
+      "Bash(npx tsc:*)",
+      "Bash(uv run:*)",
+      "Bash(cd:*)"
     ]
   }
 }
