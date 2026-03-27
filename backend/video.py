@@ -67,19 +67,28 @@ def _build_youtube_extractor_args() -> dict:
             provider = str(config_pot.get("ytdlp_pot_provider", "")).strip().lower()
         except Exception:
             pass
-    if not provider:
-        return {}
 
+    # Always set player clients that work well with or without PO tokens
+    # tv_embedded and android_embedded often bypass bot detection without tokens
     player_clients_raw = os.environ.get(YTDLP_POT_PLAYER_CLIENTS_ENV, "").strip()
     if not player_clients_raw and config_pot:
         player_clients_raw = str(config_pot.get("ytdlp_pot_player_clients", "")).strip()
     player_clients = [
-        c.strip() for c in (player_clients_raw or "mweb,web").split(",") if c.strip()
+        c.strip()
+        for c in (player_clients_raw or "tv_embedded,android_embedded,mweb,web").split(
+            ","
+        )
+        if c.strip()
     ]
 
     extractor_args: dict[str, dict[str, list[str]]] = {}
     if player_clients:
         extractor_args["youtube"] = {"player_client": player_clients}
+
+    if not provider:
+        # No PO Token provider — rely on player clients alone
+        logger.info("No PO Token provider — using player clients: %s", player_clients)
+        return extractor_args
 
     token_ttl = os.environ.get(YTDLP_POT_TOKEN_TTL_ENV, "").strip()
     if token_ttl:
@@ -92,6 +101,11 @@ def _build_youtube_extractor_args() -> dict:
         extractor_args["youtubepot-bgutilhttp"] = (
             {"base_url": [base_url]} if base_url else {}
         )
+        logger.info(
+            "PO Token: HTTP provider at %s, clients: %s",
+            base_url or "(default)",
+            player_clients,
+        )
         return extractor_args
 
     if provider == "script":
@@ -102,20 +116,25 @@ def _build_youtube_extractor_args() -> dict:
                 YTDLP_POT_PROVIDER_ENV,
                 YTDLP_POT_SERVER_HOME_ENV,
             )
-            return {}
+            return extractor_args  # return with player clients only
         if not Path(server_home).exists():
             logger.warning(
                 "Configured yt-dlp POT provider path does not exist: %s", server_home
             )
-            return {}
+            return extractor_args  # return with player clients only
         extractor_args["youtubepot-bgutilscript"] = {"server_home": [server_home]}
+        logger.info(
+            "PO Token: script provider at %s, clients: %s",
+            server_home,
+            player_clients,
+        )
         return extractor_args
 
     logger.warning(
-        "Unsupported yt-dlp POT provider '%s'; continuing without PO token provider",
+        "Unsupported yt-dlp POT provider '%s'; using player clients only",
         provider,
     )
-    return {}
+    return extractor_args
 
 
 def _build_ydl_common_opts() -> dict:
