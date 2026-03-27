@@ -22,7 +22,16 @@ import socket
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from datetime import datetime, timezone
-from fastapi import Depends, FastAPI, HTTPException, File, Form, Header, Request, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    File,
+    Form,
+    Header,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -67,7 +76,17 @@ SHORTS_DIR = OUTPUT_DIR / "shorts"
 JOBS_DIR = OUTPUT_DIR / "jobs"
 UPLOAD_DIR = OUTPUT_DIR / "uploads"
 ADMIN_ROUTE_PREFIX = "/ashmil2010"
-ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".mpg", ".mpeg", ".flv", ".wmv"}
+ALLOWED_VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".avi",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+    ".flv",
+    ".wmv",
+}
 MAX_CLIPS = 10
 SHORTS_MAX_DURATION_SECONDS = 59.0
 RECENT_JOB_LIMIT = 12
@@ -103,6 +122,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # FastAPI App
 # ========================================
 
+
 def _env_csv(name: str, default: str = "") -> list[str]:
     raw = os.environ.get(name, default)
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -123,7 +143,11 @@ def _build_trusted_hosts(hosts: list[str]) -> list[str]:
 
 
 IS_PRODUCTION = os.environ.get(APP_ENV_ENV, "").strip().lower() == "production"
-PUBLIC_DOCS_ENABLED = os.environ.get(PUBLIC_DOCS_ENV, "").strip().lower() in {"1", "true", "yes"}
+PUBLIC_DOCS_ENABLED = os.environ.get(PUBLIC_DOCS_ENV, "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 DEFAULT_ALLOWED_ORIGINS = "http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:5173,http://localhost:5173"
 DEFAULT_ALLOWED_HOSTS = "127.0.0.1,localhost"
 ALLOWED_ORIGINS = _env_csv(ALLOWED_ORIGINS_ENV, DEFAULT_ALLOWED_ORIGINS)
@@ -156,6 +180,7 @@ app.add_middleware(
 # ========================================
 # Request/Response Models
 # ========================================
+
 
 class ProcessRequest(BaseModel):
     url: str
@@ -275,8 +300,7 @@ def validate_num_clips(num_clips: int) -> int:
     """Normalize and validate requested number of clips."""
     if num_clips < 1 or num_clips > MAX_CLIPS:
         raise HTTPException(
-            status_code=400,
-            detail=f"num_clips must be between 1 and {MAX_CLIPS}"
+            status_code=400, detail=f"num_clips must be between 1 and {MAX_CLIPS}"
         )
     return num_clips
 
@@ -284,12 +308,14 @@ def validate_num_clips(num_clips: int) -> int:
 def _read_app_config() -> dict:
     """Load shared config used by AI and API key settings."""
     from .ai_engine import load_config
+
     return load_config()
 
 
 def _write_app_config(update: Dict[str, Any]):
     """Persist partial config while preserving existing keys."""
     from .ai_engine import load_config, save_config
+
     config = load_config()
     config.update(update)
     save_config(config)
@@ -338,7 +364,7 @@ def _is_api_auth_required() -> bool:
 
 async def _require_api_key(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
-    authorization: Optional[str] = Header(default=None, alias="Authorization")
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
     if not _is_api_auth_required():
         return
@@ -370,10 +396,15 @@ def _get_admin_token() -> str:
     return os.environ.get(ADMIN_API_TOKEN_ENV, "").strip()
 
 
-async def _require_admin_token(x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token")):
+async def _require_admin_token(
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
     expected = _get_admin_token()
     if not expected:
-        raise HTTPException(status_code=500, detail="Set SHORTMAKER_ADMIN_TOKEN before using admin routes.")
+        raise HTTPException(
+            status_code=500,
+            detail="Set SHORTMAKER_ADMIN_TOKEN before using admin routes.",
+        )
     if not x_admin_token or not secrets.compare_digest(x_admin_token, expected):
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
@@ -397,15 +428,15 @@ def _register_user(user: ClerkUser) -> ClerkUser:
 
 def _split_csv_env(name: str) -> set[str]:
     return {
-        item.strip()
-        for item in os.environ.get(name, "").split(",")
-        if item.strip()
+        item.strip() for item in os.environ.get(name, "").split(",") if item.strip()
     }
 
 
 def _is_admin_user(user: ClerkUser) -> bool:
     allowed_ids = _split_csv_env("SHORTMAKER_ADMIN_USER_IDS")
-    allowed_emails = {item.lower() for item in _split_csv_env("SHORTMAKER_ADMIN_EMAILS")}
+    allowed_emails = {
+        item.lower() for item in _split_csv_env("SHORTMAKER_ADMIN_EMAILS")
+    }
     if not allowed_ids and not allowed_emails:
         return False
     if user.id in allowed_ids:
@@ -421,10 +452,14 @@ def _youtube_scope_user_id(user: ClerkUser) -> Optional[str]:
     return user.id
 
 
-async def _require_admin_user(user: ClerkUser = Depends(_require_app_user)) -> ClerkUser:
+async def _require_admin_user(
+    user: ClerkUser = Depends(_require_app_user),
+) -> ClerkUser:
     if _is_admin_user(user):
         return user
-    raise HTTPException(status_code=403, detail="You do not have access to the admin console.")
+    raise HTTPException(
+        status_code=403, detail="You do not have access to the admin console."
+    )
 
 
 def _admin_console_user() -> ClerkUser:
@@ -468,7 +503,11 @@ async def _require_app_user_or_api_key(
         return _register_user(_automation_api_user())
 
     if raw_authorization:
-        token = raw_authorization[7:].strip() if raw_authorization.lower().startswith("bearer ") else raw_authorization
+        token = (
+            raw_authorization[7:].strip()
+            if raw_authorization.lower().startswith("bearer ")
+            else raw_authorization
+        )
         if token.count(".") == 2:
             return _register_user(await require_clerk_user(authorization))
         await _require_api_key(x_api_key=x_api_key, authorization=authorization)
@@ -519,7 +558,10 @@ def _mask_api_key(api_key: str) -> str:
 
 
 def _assert_secret_storage_ready(*values: str):
-    if any(str(value or "").strip() for value in values) and not has_secret_storage_key():
+    if (
+        any(str(value or "").strip() for value in values)
+        and not has_secret_storage_key()
+    ):
         raise HTTPException(
             status_code=400,
             detail=(
@@ -551,7 +593,9 @@ def _is_public_ip(value: str) -> bool:
 
 
 def _callback_host_allowed(hostname: str) -> bool:
-    allowed_hosts = {item.lower() for item in _split_csv_env(ALLOWED_CALLBACK_HOSTS_ENV)}
+    allowed_hosts = {
+        item.lower() for item in _split_csv_env(ALLOWED_CALLBACK_HOSTS_ENV)
+    }
     if not allowed_hosts:
         return False
     normalized = (hostname or "").strip().lower()
@@ -584,35 +628,57 @@ def _is_supported_youtube_url(url: str) -> bool:
     host = (parsed.netloc or "").lower()
     if host.startswith("www."):
         host = host[4:]
-    return any(host == suffix or host.endswith(f".{suffix}") for suffix in YOUTUBE_HOST_SUFFIXES)
+    return any(
+        host == suffix or host.endswith(f".{suffix}")
+        for suffix in YOUTUBE_HOST_SUFFIXES
+    )
 
 
 def _validate_callback_url(url: str):
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=400, detail="callback_url must be http or https")
+        raise HTTPException(
+            status_code=400, detail="callback_url must be http or https"
+        )
     if not parsed.hostname:
-        raise HTTPException(status_code=400, detail="callback_url must include a hostname")
+        raise HTTPException(
+            status_code=400, detail="callback_url must include a hostname"
+        )
     if parsed.username or parsed.password:
-        raise HTTPException(status_code=400, detail="callback_url must not contain embedded credentials")
+        raise HTTPException(
+            status_code=400, detail="callback_url must not contain embedded credentials"
+        )
     if not _callback_host_allowed(parsed.hostname):
-        raise HTTPException(status_code=400, detail="callback_url host is not allowlisted")
+        raise HTTPException(
+            status_code=400, detail="callback_url host is not allowlisted"
+        )
     if _is_public_ip(parsed.hostname):
         return
     try:
-        resolved_hosts = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        resolved_hosts = socket.getaddrinfo(
+            parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+        )
     except socket.gaierror as exc:
-        raise HTTPException(status_code=400, detail=f"callback_url host could not be resolved: {exc}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"callback_url host could not be resolved: {exc}"
+        ) from exc
     resolved_ips = {entry[4][0] for entry in resolved_hosts if entry and entry[4]}
     if not resolved_ips:
-        raise HTTPException(status_code=400, detail="callback_url host could not be resolved")
+        raise HTTPException(
+            status_code=400, detail="callback_url host could not be resolved"
+        )
     if _allow_private_callbacks():
         return
     if not all(_is_public_ip(ip) for ip in resolved_ips):
-        raise HTTPException(status_code=400, detail="callback_url must resolve only to public IP addresses")
+        raise HTTPException(
+            status_code=400,
+            detail="callback_url must resolve only to public IP addresses",
+        )
 
 
-def _build_result_payload(job_id: str, status: dict, public_base_url: Optional[str] = None):
+def _build_result_payload(
+    job_id: str, status: dict, public_base_url: Optional[str] = None
+):
     results = status.get("results", []) or []
     base = (public_base_url or "").rstrip("/")
     short_urls = [f"{base}/shorts/{name}" for name in results] if base else []
@@ -657,13 +723,17 @@ def _derive_clip_title(highlight: dict, index: int) -> str:
     return (title or f"Short #{index}")[:80]
 
 
-def _clamp_highlights_to_short_duration(highlights: list[dict], video_duration: float) -> list[dict]:
+def _clamp_highlights_to_short_duration(
+    highlights: list[dict], video_duration: float
+) -> list[dict]:
     normalized: list[dict] = []
     for highlight in highlights or []:
         if not isinstance(highlight, dict):
             continue
         start = max(0.0, float(highlight.get("start", 0) or 0))
-        end = min(float(highlight.get("end", start) or start), float(video_duration or 0))
+        end = min(
+            float(highlight.get("end", start) or start), float(video_duration or 0)
+        )
         if end <= start:
             continue
         if end - start > SHORTS_MAX_DURATION_SECONDS:
@@ -713,29 +783,35 @@ def _send_callback(job_id: str, status: dict, callback_info: dict):
     if not callback_url:
         return
 
-    timeout_seconds = callback_info.get("callback_timeout_seconds", DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS)
+    timeout_seconds = callback_info.get(
+        "callback_timeout_seconds", DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS
+    )
     if not isinstance(timeout_seconds, (int, float)):
         timeout_seconds = DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS
 
     payload = _build_result_payload(
-        job_id,
-        status,
-        public_base_url=callback_info.get("public_base_url")
+        job_id, status, public_base_url=callback_info.get("public_base_url")
     )
-    payload.update({
-        "event": "completed" if payload["status"] == "complete" else "failed",
-        "completed_at": datetime.now(timezone.utc).isoformat(),
-        "success": payload["status"] == "complete",
-    })
+    payload.update(
+        {
+            "event": "completed" if payload["status"] == "complete" else "failed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "success": payload["status"] == "complete",
+        }
+    )
 
     headers = {"Content-Type": "application/json"}
-    auth_header = (callback_info.get("callback_auth_header") or "X-Callback-Token").strip()
+    auth_header = (
+        callback_info.get("callback_auth_header") or "X-Callback-Token"
+    ).strip()
     callback_token = callback_info.get("callback_token")
     if callback_token:
         headers[auth_header or "X-Callback-Token"] = callback_token
 
     body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(callback_url, data=body, headers=headers, method="POST")
+    request = urllib.request.Request(
+        callback_url, data=body, headers=headers, method="POST"
+    )
 
     try:
         with urllib.request.urlopen(request, timeout=int(timeout_seconds)) as response:
@@ -748,11 +824,12 @@ def _send_callback(job_id: str, status: dict, callback_info: dict):
 # Persistent Job Storage (File-based for stability)
 # ========================================
 
+
 def save_job_status(job_id: str, status_data: dict):
     """Save job status to file for persistence across restarts."""
     try:
         job_file = JOBS_DIR / f"{job_id}.json"
-        with open(job_file, 'w') as f:
+        with open(job_file, "w") as f:
             json.dump(status_data, f)
     except Exception as e:
         logger.error(f"Failed to save job status: {e}")
@@ -763,10 +840,10 @@ def load_job_status(job_id: str) -> Optional[dict]:
     try:
         job_file = JOBS_DIR / f"{job_id}.json"
         if job_file.exists():
-            with open(job_file, 'r') as f:
+            with open(job_file, "r") as f:
                 return json.load(f)
     except Exception as e:
-            logger.error(f"Failed to load job status: {e}")
+        logger.error(f"Failed to load job status: {e}")
     return None
 
 
@@ -776,7 +853,9 @@ def _is_terminal_job_stage(stage: Optional[str]) -> bool:
 
 def _mark_job_interrupted(job_id: str, status_data: dict, reason: str):
     """Convert an in-flight persisted job into an explicit error state."""
-    stage = (status_data.get("stage") or status_data.get("status") or "").strip().lower()
+    stage = (
+        (status_data.get("stage") or status_data.get("status") or "").strip().lower()
+    )
     if _is_terminal_job_stage(stage):
         return
 
@@ -793,7 +872,9 @@ def _mark_job_interrupted(job_id: str, status_data: dict, reason: str):
         "interrupted_progress": status_data.get("progress", 0),
     }
     save_job_status(job_id, interrupted_status)
-    logger.warning(f"[{job_id[:8]}] marked interrupted after restart (was {stage or 'unknown'})")
+    logger.warning(
+        f"[{job_id[:8]}] marked interrupted after restart (was {stage or 'unknown'})"
+    )
 
 
 def recover_incomplete_jobs():
@@ -809,9 +890,16 @@ def recover_incomplete_jobs():
         _mark_job_interrupted(job_file.stem, status, reason)
 
 
-def update_job_status(job_id: str, stage: str, progress: int, message: str, 
-                      error: Optional[str] = None, results: list = None,
-                      ai_highlights: list = None, metadata: Optional[dict] = None):
+def update_job_status(
+    job_id: str,
+    stage: str,
+    progress: int,
+    message: str,
+    error: Optional[str] = None,
+    results: list = None,
+    ai_highlights: list = None,
+    metadata: Optional[dict] = None,
+):
     """Update and persist job status."""
     previous = load_job_status(job_id) or {}
     status_data = {
@@ -822,8 +910,11 @@ def update_job_status(job_id: str, stage: str, progress: int, message: str,
         "message": message,
         "error": error,
         "results": results if results is not None else previous.get("results", []),
-        "ai_highlights": ai_highlights if ai_highlights is not None else previous.get("ai_highlights", []),
-        "created_at": previous.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        "ai_highlights": ai_highlights
+        if ai_highlights is not None
+        else previous.get("ai_highlights", []),
+        "created_at": previous.get("created_at")
+        or datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if metadata:
@@ -840,9 +931,15 @@ async def _recover_interrupted_jobs_on_startup():
     from .ytdlp_cookie_sync import ensure_cookie_auto_sync_worker_started
 
     if not os.environ.get("CLERK_ISSUER", "").strip():
-        logger.warning("CLERK_ISSUER is not configured. Authenticated routes will reject requests.")
-    if not _split_csv_env("SHORTMAKER_ADMIN_USER_IDS") and not _split_csv_env("SHORTMAKER_ADMIN_EMAILS"):
-        logger.warning("No admin allowlist configured. Admin routes are disabled until SHORTMAKER_ADMIN_USER_IDS or SHORTMAKER_ADMIN_EMAILS is set.")
+        logger.warning(
+            "CLERK_ISSUER is not configured. Authenticated routes will reject requests."
+        )
+    if not _split_csv_env("SHORTMAKER_ADMIN_USER_IDS") and not _split_csv_env(
+        "SHORTMAKER_ADMIN_EMAILS"
+    ):
+        logger.warning(
+            "No admin allowlist configured. Admin routes are disabled until SHORTMAKER_ADMIN_USER_IDS or SHORTMAKER_ADMIN_EMAILS is set."
+        )
     init_database()
     recover_incomplete_jobs()
     ensure_cookie_auto_sync_worker_started()
@@ -871,9 +968,15 @@ def list_recent_jobs(
         status = load_job_status(job_id)
         if not status:
             continue
-        if owner_id and _owner_id_from_status(status) and _owner_id_from_status(status) != owner_id:
+        if (
+            owner_id
+            and _owner_id_from_status(status)
+            and _owner_id_from_status(status) != owner_id
+        ):
             continue
-        jobs.append(_build_result_payload(job_id, status, public_base_url=public_base_url))
+        jobs.append(
+            _build_result_payload(job_id, status, public_base_url=public_base_url)
+        )
     return jobs
 
 
@@ -891,7 +994,9 @@ def _build_callback_config(
         "callback_url": callback_url,
         "callback_token": callback_token,
         "callback_auth_header": callback_auth_header,
-        "callback_timeout_seconds": _normalize_callback_timeout(callback_timeout_seconds),
+        "callback_timeout_seconds": _normalize_callback_timeout(
+            callback_timeout_seconds
+        ),
     }
 
 
@@ -928,7 +1033,9 @@ def _resolve_youtube_oauth_origin(request: Request) -> str:
     configured = _normalize_oauth_origin(os.environ.get(YOUTUBE_OAUTH_BASE_URL_ENV, ""))
     if configured:
         return configured
-    return _normalize_oauth_origin(str(request.base_url)) or str(request.base_url).rstrip("/")
+    return _normalize_oauth_origin(str(request.base_url)) or str(
+        request.base_url
+    ).rstrip("/")
 
 
 def _prefer_loopback_redirect_origin(origin: str) -> str:
@@ -943,11 +1050,15 @@ def _prefer_loopback_redirect_origin(origin: str) -> str:
 def _build_youtube_redirect_uri(request: Request) -> str:
     origin = _resolve_youtube_oauth_origin(request)
     redirect_origin = _prefer_loopback_redirect_origin(origin)
-    configured_callback = _normalize_oauth_callback_uri(os.environ.get(YOUTUBE_OAUTH_CALLBACK_URI_ENV, ""))
+    configured_callback = _normalize_oauth_callback_uri(
+        os.environ.get(YOUTUBE_OAUTH_CALLBACK_URI_ENV, "")
+    )
     if configured_callback:
         return configured_callback
 
-    normalized_relative = (os.environ.get("SHORTMAKER_YOUTUBE_OAUTH_CALLBACK_PATH", "") or "").strip()
+    normalized_relative = (
+        os.environ.get("SHORTMAKER_YOUTUBE_OAUTH_CALLBACK_PATH", "") or ""
+    ).strip()
     if normalized_relative:
         if normalized_relative.startswith("/"):
             return f"{redirect_origin}{normalized_relative}"
@@ -1031,7 +1142,7 @@ async def _queue_upload_job(
     if ext and ext not in ALLOWED_VIDEO_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{ext}'. Upload mp4/mov/mkv/webm/avi/flv/wmv."
+            detail=f"Unsupported file type '{ext}'. Upload mp4/mov/mkv/webm/avi/flv/wmv.",
         )
 
     job_id = str(uuid.uuid4())
@@ -1047,7 +1158,9 @@ async def _queue_upload_job(
                     break
                 fp.write(chunk)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to store uploaded file: {str(exc)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to store uploaded file: {str(exc)}"
+        )
     finally:
         await file.close()
 
@@ -1098,7 +1211,9 @@ async def _queue_upload_job(
     return ProcessResponse(job_id=job_id, message="Upload processing started")
 
 
-def _get_job_payload(job_id: str, public_base_url: Optional[str] = None, user: Optional[ClerkUser] = None) -> dict:
+def _get_job_payload(
+    job_id: str, public_base_url: Optional[str] = None, user: Optional[ClerkUser] = None
+) -> dict:
     status = load_job_status(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1107,14 +1222,19 @@ def _get_job_payload(job_id: str, public_base_url: Optional[str] = None, user: O
     return _build_result_payload(job_id, status, public_base_url=public_base_url)
 
 
-def _get_completed_result_payload(job_id: str, public_base_url: str, user: Optional[ClerkUser] = None) -> dict:
+def _get_completed_result_payload(
+    job_id: str, public_base_url: str, user: Optional[ClerkUser] = None
+) -> dict:
     status = load_job_status(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if user:
         _assert_job_ownership(job_id, status, user)
     if status.get("stage") != "complete":
-        raise HTTPException(status_code=400, detail=f"Job not complete. Current stage: {status.get('stage')}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job not complete. Current stage: {status.get('stage')}",
+        )
 
     payload = _build_result_payload(job_id, status, public_base_url=public_base_url)
     payload["success"] = True
@@ -1122,7 +1242,9 @@ def _get_completed_result_payload(job_id: str, public_base_url: str, user: Optio
     return payload
 
 
-def _build_capabilities_payload(*, require_api_key: bool, admin_console: bool = False) -> dict:
+def _build_capabilities_payload(
+    *, require_api_key: bool, admin_console: bool = False
+) -> dict:
     from .ai_engine import load_config, get_api_key
     from .trends import has_firecrawl_config
     from .youtube_publish import has_youtube_client_config, has_youtube_connection
@@ -1132,8 +1254,14 @@ def _build_capabilities_payload(*, require_api_key: bool, admin_console: bool = 
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
     firecrawl_key = os.environ.get("FIRECRAWL_API_KEY", "").strip()
     effective_gemini = gemini_key if admin_console else (gemini_key or get_api_key())
-    effective_groq = groq_key if admin_console else (groq_key or config.get("groq_api_key", ""))
-    effective_firecrawl = firecrawl_key if admin_console else (firecrawl_key or config.get("firecrawl_api_key", ""))
+    effective_groq = (
+        groq_key if admin_console else (groq_key or config.get("groq_api_key", ""))
+    )
+    effective_firecrawl = (
+        firecrawl_key
+        if admin_console
+        else (firecrawl_key or config.get("firecrawl_api_key", ""))
+    )
 
     return {
         "max_clips": MAX_CLIPS,
@@ -1163,6 +1291,7 @@ def _build_capabilities_payload(*, require_api_key: bool, admin_console: bool = 
 # Processing Logic (Inline to avoid import issues)
 # ========================================
 
+
 def run_processing_job(
     job_id: str,
     source: str,
@@ -1175,45 +1304,55 @@ def run_processing_job(
     """Background task to process a video."""
     import time
     import shutil
-    
+
     try:
-        update_job_status(job_id, "starting", 5, "Initializing AI processing pipeline...")
-        
+        update_job_status(
+            job_id, "starting", 5, "Initializing AI processing pipeline..."
+        )
+
         # Import here to avoid startup issues
         from .video import download_video
         from .transcription import transcribe_video, get_segments_in_range
         from .highlights import detect_highlights
         from .ai_engine import is_ai_enabled, ai_enrich_highlight_metadata
-        
+
         import sys
+
         sys.path.insert(0, str(BASE_DIR))
-        from utils.ffmpeg_helpers import create_shorts, get_video_info as ffmpeg_get_info
-        
+        from utils.ffmpeg_helpers import (
+            create_shorts,
+            get_video_info as ffmpeg_get_info,
+        )
+
         ai_active = is_ai_enabled()
         ai_label = "🤖 AI-Powered" if ai_active else "📏 Rule-Based"
-        
+
         temp_dir = OUTPUT_DIR / "temp" / job_id
         shorts_dir = SHORTS_DIR
-        
+
         # Clean up any previous temp files
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
         temp_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # ========================================
         # STAGE 1: Acquire Video
         # ========================================
         if source_type == "youtube":
-            update_job_status(job_id, "downloading", 10, "Downloading video from YouTube...")
+            update_job_status(
+                job_id, "downloading", 10, "Downloading video from YouTube..."
+            )
             try:
                 download_result = download_video(source, str(temp_dir))
-                video_path = download_result['path']
-                video_info = download_result['info']
+                video_path = download_result["path"]
+                video_info = download_result["info"]
             except Exception as e:
-                update_job_status(job_id, "error", 0, f"Download failed: {str(e)}", error=str(e))
+                update_job_status(
+                    job_id, "error", 0, f"Download failed: {str(e)}", error=str(e)
+                )
                 return
-            
-            video_title = video_info.get('title', 'Unknown')
+
+            video_title = video_info.get("title", "Unknown")
             update_job_status(
                 job_id,
                 "downloading",
@@ -1226,21 +1365,31 @@ def run_processing_job(
                     "video_id": video_info.get("id"),
                 },
             )
-            
+
             source_type_label = "YouTube"
         else:
             update_job_status(job_id, "processing", 10, "Using uploaded source file...")
             if not os.path.exists(source):
-                update_job_status(job_id, "error", 0, f"Uploaded video not found: {source}", error="source not found")
+                update_job_status(
+                    job_id,
+                    "error",
+                    0,
+                    f"Uploaded video not found: {source}",
+                    error="source not found",
+                )
                 return
-            
+
             # Copy into temp directory so cleanup is predictable
             ext = Path(source).suffix.lower()
             staged_path = temp_dir / f"source{ext}"
             shutil.copy2(source, staged_path)
             video_path = str(staged_path)
             video_title = Path(original_filename or Path(source).name).stem
-            video_info = {'title': original_filename or Path(source).name, 'duration': 0, 'id': Path(source).stem}
+            video_info = {
+                "title": original_filename or Path(source).name,
+                "duration": 0,
+                "id": Path(source).stem,
+            }
             source_type_label = "Uploaded file"
             update_job_status(
                 job_id,
@@ -1254,16 +1403,16 @@ def run_processing_job(
                     "video_id": Path(source).stem,
                 },
             )
-        
+
         # Get video duration from ffprobe for accuracy
         try:
             ffmpeg_info = ffmpeg_get_info(video_path)
-            video_duration = ffmpeg_info['duration']
+            video_duration = ffmpeg_info["duration"]
             if not video_duration:
-                video_duration = video_info.get('duration', 300) or 300
+                video_duration = video_info.get("duration", 300) or 300
         except Exception as e:
             logger.error(f"FFmpeg info error: {e}")
-            video_duration = video_info.get('duration', 300) or 300
+            video_duration = video_info.get("duration", 300) or 300
 
         update_job_status(
             job_id,
@@ -1276,112 +1425,159 @@ def run_processing_job(
                 "source_type": source_type,
             },
         )
-        
+
         # ========================================
         # STAGE 2: Transcribe with Whisper
         # ========================================
-        update_job_status(job_id, "transcribing", 30, "Transcribing audio with Whisper (this may take a while)...")
-        
+        update_job_status(
+            job_id,
+            "transcribing",
+            30,
+            "Transcribing audio with Whisper (this may take a while)...",
+        )
+
         try:
             local_whisper_model = os.environ.get("LOCAL_WHISPER_MODEL", "base")
             segments = transcribe_video(video_path, model_size=local_whisper_model)
         except Exception as e:
-            update_job_status(job_id, "error", 0, f"Transcription failed: {str(e)}", error=str(e))
+            update_job_status(
+                job_id, "error", 0, f"Transcription failed: {str(e)}", error=str(e)
+            )
             return
-        
-        update_job_status(job_id, "transcribing", 55, f"Transcribed {len(segments)} segments")
-        
+
+        update_job_status(
+            job_id, "transcribing", 55, f"Transcribed {len(segments)} segments"
+        )
+
         # ========================================
         # STAGE 3: Detect Highlights (AI or Rule-based)
         # ========================================
-        update_job_status(job_id, "analyzing", 60, f"{ai_label}: Analyzing transcript for best moments from {source_type_label}...")
-        
+        update_job_status(
+            job_id,
+            "analyzing",
+            60,
+            f"{ai_label}: Analyzing transcript for best moments from {source_type_label}...",
+        )
+
         try:
             highlights = detect_highlights(
                 segments=segments,
                 video_duration=video_duration,
                 num_clips=num_clips,
                 video_title=video_title,
-                video_path=video_path
+                video_path=video_path,
             )
         except Exception as e:
-            update_job_status(job_id, "error", 0, f"Highlight detection failed: {str(e)}", error=str(e))
+            update_job_status(
+                job_id,
+                "error",
+                0,
+                f"Highlight detection failed: {str(e)}",
+                error=str(e),
+            )
             return
-        
+
         if not highlights:
-            update_job_status(job_id, "error", 0, "No highlights detected. Video may be too short.", 
-                            error="No highlights detected")
+            update_job_status(
+                job_id,
+                "error",
+                0,
+                "No highlights detected. Video may be too short.",
+                error="No highlights detected",
+            )
             return
         highlights = _clamp_highlights_to_short_duration(highlights, video_duration)
         if not highlights:
-            update_job_status(job_id, "error", 0, "No valid sub-60-second highlights were found.", error="No valid short highlights")
+            update_job_status(
+                job_id,
+                "error",
+                0,
+                "No valid sub-60-second highlights were found.",
+                error="No valid short highlights",
+            )
             return
 
         # Enrich each clip with trendy metadata (AI titles + captions)
         if ai_active:
-            update_job_status(job_id, "analyzing", 68, "Generating AI short titles and trendy captions...")
+            update_job_status(
+                job_id,
+                "analyzing",
+                68,
+                "Generating AI short titles and trendy captions...",
+            )
             for i, h in enumerate(highlights):
-                clip_segments = get_segments_in_range(segments, h.get('start', 0), h.get('end', 0))
-                clip_text = " ".join(seg['text'] for seg in clip_segments).strip()
-                if not clip_text:
-                    clip_text = h.get('text', '')
-                
-                metadata = ai_enrich_highlight_metadata(
-                    transcript_text=clip_text,
-                    reason=h.get('reason', 'highlight')
+                clip_segments = get_segments_in_range(
+                    segments, h.get("start", 0), h.get("end", 0)
                 )
-                
+                clip_text = " ".join(seg["text"] for seg in clip_segments).strip()
+                if not clip_text:
+                    clip_text = h.get("text", "")
+
+                metadata = ai_enrich_highlight_metadata(
+                    transcript_text=clip_text, reason=h.get("reason", "highlight")
+                )
+
                 if not metadata:
                     continue
-                
-                if not h.get('title'):
-                    h['title'] = metadata.get('title', '')
-                if not h.get('hook_caption'):
-                    h['hook_caption'] = metadata.get('hook_caption', '')
-                if not h.get('trendy_caption'):
-                    h['trendy_caption'] = metadata.get('trendy_caption', '')
 
-                h['hashtags'] = metadata.get('hashtags', h.get('hashtags', []))
-                h['caption_pack'] = metadata
-        
+                if not h.get("title"):
+                    h["title"] = metadata.get("title", "")
+                if not h.get("hook_caption"):
+                    h["hook_caption"] = metadata.get("hook_caption", "")
+                if not h.get("trendy_caption"):
+                    h["trendy_caption"] = metadata.get("trendy_caption", "")
+
+                h["hashtags"] = metadata.get("hashtags", h.get("hashtags", []))
+                h["caption_pack"] = metadata
+
         # Fill any missing trendy captions with a strong fallback
         for index, h in enumerate(highlights, start=1):
-            if not h.get('trendy_caption'):
-                if h.get('hook_caption'):
-                    h['trendy_caption'] = h['hook_caption']
+            if not h.get("trendy_caption"):
+                if h.get("hook_caption"):
+                    h["trendy_caption"] = h["hook_caption"]
                 else:
-                    h['trendy_caption'] = f"{h.get('text', 'Clip excerpt')[:110].strip()}..."
-            if not h.get('title'):
-                h['title'] = _derive_clip_title(h, index)
-        
+                    h["trendy_caption"] = (
+                        f"{h.get('text', 'Clip excerpt')[:110].strip()}..."
+                    )
+            if not h.get("title"):
+                h["title"] = _derive_clip_title(h, index)
+
         # Check if AI provided enhanced data
-        has_ai_data = any(h.get('title') or h.get('virality_score') for h in highlights)
-        
+        has_ai_data = any(h.get("title") or h.get("virality_score") for h in highlights)
+
         if has_ai_data:
             update_job_status(
                 job_id,
                 "analyzing",
                 70,
                 f"🤖 AI found {len(highlights)} viral moments! Top virality: "
-                f"{max(h.get('virality_score', 0) for h in highlights)}/10"
+                f"{max(h.get('virality_score', 0) for h in highlights)}/10",
             )
         else:
-            update_job_status(job_id, "analyzing", 70, f"Found {len(highlights)} highlight segments")
-        
+            update_job_status(
+                job_id, "analyzing", 70, f"Found {len(highlights)} highlight segments"
+            )
+
         # ========================================
         # STAGE 4: Generate Short Clips
         # ========================================
-        update_job_status(job_id, "generating", 75, "Creating vertical short clips with captions...")
+        update_job_status(
+            job_id, "generating", 75, "Creating vertical short clips with captions..."
+        )
         rendered_results: list[str] = []
 
-        def on_short_render_progress(completed_count: int, total_count: int, output_path: str, highlight: dict):
+        def on_short_render_progress(
+            completed_count: int, total_count: int, output_path: str, highlight: dict
+        ):
             if completed_count <= 0:
                 return
             filename = os.path.basename(output_path)
             if filename not in rendered_results:
                 rendered_results.append(filename)
             progress = min(98, 75 + int((completed_count / max(total_count, 1)) * 23))
-            clip_label = completed_count if completed_count <= total_count else total_count
+            clip_label = (
+                completed_count if completed_count <= total_count else total_count
+            )
             update_job_status(
                 job_id,
                 "generating",
@@ -1389,7 +1585,7 @@ def run_processing_job(
                 f"Rendered short {clip_label}/{total_count}",
                 results=rendered_results,
             )
-        
+
         try:
             output_files = create_shorts(
                 input_video=video_path,
@@ -1400,42 +1596,48 @@ def run_processing_job(
                 progress_callback=on_short_render_progress,
             )
         except Exception as e:
-            update_job_status(job_id, "error", 0, f"Video generation failed: {str(e)}", error=str(e))
+            update_job_status(
+                job_id, "error", 0, f"Video generation failed: {str(e)}", error=str(e)
+            )
             return
-        
+
         # ========================================
         # COMPLETE
         # ========================================
         result_files = [os.path.basename(f) for f in output_files]
-        
+
         # Build AI highlights info
         ai_highlights_data = []
         for i, h in enumerate(highlights):
-            hashtags = h.get('hashtags', [])
+            hashtags = h.get("hashtags", [])
             if not isinstance(hashtags, list):
                 hashtags = []
-            
-            ai_highlights_data.append({
-                'index': i + 1,
-                'filename': result_files[i] if i < len(result_files) else '',
-                'title': _derive_clip_title(h, i + 1),
-                'hook_caption': h.get('hook_caption', ''),
-                'trendy_caption': h.get('trendy_caption', ''),
-                'hashtags': hashtags,
-                'virality_score': h.get('virality_score', 0),
-                'face_score': round(float(h.get('face_score', 0.0)), 4),
-                'face_presence': round(float(h.get('face_presence', 0.0)), 4),
-                'face_center_offset': round(float(h.get('face_center_offset', 0.0)), 4),
-                'reason': h.get('reason', 'highlight'),
-                'start': h.get('start', 0),
-                'end': h.get('end', 0),
-                'text': h.get('text', '')[:200],
-            })
-        
+
+            ai_highlights_data.append(
+                {
+                    "index": i + 1,
+                    "filename": result_files[i] if i < len(result_files) else "",
+                    "title": _derive_clip_title(h, i + 1),
+                    "hook_caption": h.get("hook_caption", ""),
+                    "trendy_caption": h.get("trendy_caption", ""),
+                    "hashtags": hashtags,
+                    "virality_score": h.get("virality_score", 0),
+                    "face_score": round(float(h.get("face_score", 0.0)), 4),
+                    "face_presence": round(float(h.get("face_presence", 0.0)), 4),
+                    "face_center_offset": round(
+                        float(h.get("face_center_offset", 0.0)), 4
+                    ),
+                    "reason": h.get("reason", "highlight"),
+                    "start": h.get("start", 0),
+                    "end": h.get("end", 0),
+                    "text": h.get("text", "")[:200],
+                }
+            )
+
         update_job_status(
-            job_id, 
-            "complete", 
-            100, 
+            job_id,
+            "complete",
+            100,
             f"✨ Generated {len(result_files)} viral shorts!",
             results=result_files,
             ai_highlights=ai_highlights_data,
@@ -1446,16 +1648,18 @@ def run_processing_job(
                 "completed_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        
+
         # Clean up temp files
         try:
             shutil.rmtree(temp_dir)
         except:
             pass
-        
+
     except Exception as e:
         logger.error(f"Processing error: {traceback.format_exc()}")
-        update_job_status(job_id, "error", 0, f"Processing failed: {str(e)}", error=str(e))
+        update_job_status(
+            job_id, "error", 0, f"Processing failed: {str(e)}", error=str(e)
+        )
     finally:
         final_status = load_job_status(job_id) or {}
         if callback_config:
@@ -1465,7 +1669,7 @@ def run_processing_job(
                 callback_info={
                     **callback_config,
                     "public_base_url": public_base_url,
-                }
+                },
             )
 
         if source_type == "upload":
@@ -1479,6 +1683,7 @@ def run_processing_job(
 # ========================================
 # API Endpoints
 # ========================================
+
 
 @app.get("/session", response_model=SessionResponse)
 async def get_session(user: ClerkUser = Depends(_require_app_user)):
@@ -1501,7 +1706,9 @@ async def get_usage(user: ClerkUser = Depends(_require_app_user)):
 
 
 @app.post("/process", response_model=ProcessResponse)
-async def start_processing(request: ProcessRequest, user: ClerkUser = Depends(_require_app_user_or_api_key)):
+async def start_processing(
+    request: ProcessRequest, user: ClerkUser = Depends(_require_app_user_or_api_key)
+):
     if not _is_automation_api_user(user):
         _assert_daily_quota(user)
     return _queue_youtube_job(request, user)
@@ -1515,7 +1722,9 @@ async def start_processing_upload(
     callback_token: Optional[str] = Form(default=None),
     callback_auth_header: str = Form(default="X-Callback-Token"),
     public_base_url: Optional[str] = Form(default=None),
-    callback_timeout_seconds: int = Form(default=DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS),
+    callback_timeout_seconds: int = Form(
+        default=DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS
+    ),
     user: ClerkUser = Depends(_require_app_user_or_api_key),
 ):
     if not _is_automation_api_user(user):
@@ -1533,12 +1742,20 @@ async def start_processing_upload(
 
 
 @app.get("/status/{job_id}")
-async def get_status(job_id: str, request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)):
-    return _get_job_payload(job_id, public_base_url=_resolve_public_base_url(request), user=user)
+async def get_status(
+    job_id: str,
+    request: Request,
+    user: ClerkUser = Depends(_require_app_user_or_api_key),
+):
+    return _get_job_payload(
+        job_id, public_base_url=_resolve_public_base_url(request), user=user
+    )
 
 
 @app.get("/jobs/recent")
-async def get_recent_jobs(request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)):
+async def get_recent_jobs(
+    request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)
+):
     base_url = _resolve_public_base_url(request)
     jobs = list_recent_jobs(public_base_url=base_url, owner_id=user.id)
     return {
@@ -1548,26 +1765,30 @@ async def get_recent_jobs(request: Request, user: ClerkUser = Depends(_require_a
 
 
 @app.get("/result/{job_id}")
-async def get_result(job_id: str, request: Request, user: ClerkUser = Depends(_require_app_user_or_api_key)):
-    return _get_completed_result_payload(job_id, _resolve_public_base_url(request), user=user)
+async def get_result(
+    job_id: str,
+    request: Request,
+    user: ClerkUser = Depends(_require_app_user_or_api_key),
+):
+    return _get_completed_result_payload(
+        job_id, _resolve_public_base_url(request), user=user
+    )
 
 
 @app.get("/shorts/{filename}")
-async def download_short(filename: str, user: ClerkUser = Depends(_require_app_user_or_api_key)):
+async def download_short(
+    filename: str, user: ClerkUser = Depends(_require_app_user_or_api_key)
+):
     """Download a generated short clip."""
     safe_name = Path(filename).name
     file_path = SHORTS_DIR / safe_name
-    
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     if database_enabled() and not result_file_belongs_to_user(user.id, safe_name):
         raise HTTPException(status_code=404, detail="File not found")
-    
-    return FileResponse(
-        path=str(file_path),
-        filename=filename,
-        media_type="video/mp4"
-    )
+
+    return FileResponse(path=str(file_path), filename=filename, media_type="video/mp4")
 
 
 @app.get("/shorts")
@@ -1583,16 +1804,18 @@ async def list_shorts(user: ClerkUser = Depends(_require_app_user_or_api_key)):
 
 
 @app.delete("/shorts/{filename}")
-async def delete_short(filename: str, user: ClerkUser = Depends(_require_app_user_or_api_key)):
+async def delete_short(
+    filename: str, user: ClerkUser = Depends(_require_app_user_or_api_key)
+):
     """Delete a generated short clip."""
     safe_name = _safe_filename(filename)
     file_path = SHORTS_DIR / safe_name
-    
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     if database_enabled() and not result_file_belongs_to_user(user.id, safe_name):
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     os.remove(file_path)
     return {"message": f"Deleted {safe_name}"}
 
@@ -1603,9 +1826,7 @@ async def clear_shorts(user: ClerkUser = Depends(_require_app_user_or_api_key)):
     if SHORTS_DIR.exists():
         jobs = list_recent_jobs(limit=RECENT_JOB_LIMIT * 4, owner_id=user.id)
         owned_files = {
-            filename
-            for job in jobs
-            for filename in (job.get("results", []) or [])
+            filename for job in jobs for filename in (job.get("results", []) or [])
         }
         for filename in owned_files:
             file_path = SHORTS_DIR / filename
@@ -1618,6 +1839,7 @@ async def clear_shorts(user: ClerkUser = Depends(_require_app_user_or_api_key)):
 # ========================================
 # API Key Management Endpoints
 # ========================================
+
 
 class APIKeyRequest(BaseModel):
     name: str = "n8n-automation"
@@ -1643,7 +1865,9 @@ async def list_api_keys(admin: None = Depends(_require_admin_token)):
 
 
 @app.post("/api-keys")
-async def create_api_key(payload: APIKeyRequest, admin: None = Depends(_require_admin_token)):
+async def create_api_key(
+    payload: APIKeyRequest, admin: None = Depends(_require_admin_token)
+):
     """Create a new API key for automation clients."""
     api_key = secrets.token_urlsafe(DEFAULT_API_KEY_LENGTH)
     key_entry = {
@@ -1665,7 +1889,7 @@ async def create_api_key(payload: APIKeyRequest, admin: None = Depends(_require_
         "api_key": api_key,
         "masked_api_key": _mask_api_key(api_key),
         "prefix": key_entry["prefix"],
-        "message": "Store this key now; it cannot be retrieved again."
+        "message": "Store this key now; it cannot be retrieved again.",
     }
 
 
@@ -1685,12 +1909,14 @@ async def get_auth_mode():
         mode=mode,
         requires_api_key=mode == AUTH_MODE_PRODUCTION or len(_list_api_keys()) > 0,
         api_key_count=len(_list_api_keys()),
-        admin_token_configured=bool(_get_admin_token())
+        admin_token_configured=bool(_get_admin_token()),
     )
 
 
 @app.post("/auth/mode", response_model=AuthModeResponse)
-async def set_auth_mode(payload: AuthModeRequest, admin: None = Depends(_require_admin_token)):
+async def set_auth_mode(
+    payload: AuthModeRequest, admin: None = Depends(_require_admin_token)
+):
     """Force auth mode for production/quick behavior."""
     try:
         _set_auth_mode(payload.mode)
@@ -1701,7 +1927,7 @@ async def set_auth_mode(payload: AuthModeRequest, admin: None = Depends(_require
         mode=_get_auth_mode(),
         requires_api_key=_is_api_auth_required(),
         api_key_count=len(_list_api_keys()),
-        admin_token_configured=bool(_get_admin_token())
+        admin_token_configured=bool(_get_admin_token()),
     )
 
 
@@ -1709,17 +1935,65 @@ async def set_auth_mode(payload: AuthModeRequest, admin: None = Depends(_require
 # AI Configuration Endpoints
 # ========================================
 
+
 def _build_ai_config_response() -> dict:
     """Get current AI configuration status."""
     from .ai_engine import load_config, is_ai_enabled, get_api_key
     from .youtube_publish import get_youtube_status
-    from .ytdlp_cookie_sync import browser_cookie_dependency_available, get_cookie_auto_sync_state
-    
+    from .ytdlp_cookie_sync import (
+        browser_cookie_dependency_available,
+        get_cookie_auto_sync_state,
+    )
+
     config = load_config()
     api_key = get_api_key()
     youtube_status = get_youtube_status()
     cookie_sync_state = get_cookie_auto_sync_state(config)
-    
+
+    # Download auth fields
+    pot_provider = (
+        os.environ.get("SHORTMAKER_YTDLP_POT_PROVIDER", "").strip()
+        or str(config.get("ytdlp_pot_provider", "")).strip()
+        or "disabled"
+    )
+    pot_base_url = (
+        os.environ.get("SHORTMAKER_YTDLP_POT_BASE_URL", "").strip()
+        or str(config.get("ytdlp_pot_base_url", "")).strip()
+    )
+    pot_server_healthy = None
+    if pot_provider == "http" and pot_base_url:
+        try:
+            import urllib.request
+
+            health_url = pot_base_url.rstrip("/") + "/ping"
+            req = urllib.request.Request(health_url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                pot_server_healthy = resp.status == 200
+        except Exception:
+            pot_server_healthy = False
+
+    # PO Token server management capabilities
+    try:
+        from .pot_server import (
+            get_server_status as _pot_status,
+            DEFAULT_PORT as _POT_PORT,
+        )
+
+        _psi = _pot_status(port=_POT_PORT)
+        pot_server_running = (
+            _psi.get("process_running", False) or _psi.get("healthy") is True
+        )
+        pot_server_can_start = _psi.get("docker_image_available", False) or _psi.get(
+            "native_installed", False
+        )
+        pot_docker_available = _psi.get("docker_available", False)
+        pot_node_available = _psi.get("node_available", False)
+    except Exception:
+        pot_server_running = False
+        pot_server_can_start = False
+        pot_docker_available = False
+        pot_node_available = False
+
     return {
         "ai_enabled": config.get("ai_enabled", False),
         "has_api_key": bool(api_key),
@@ -1730,7 +2004,9 @@ def _build_ai_config_response() -> dict:
         **cookie_sync_state,
         "has_youtube_client_config": youtube_status.get("has_client_config", False),
         "has_youtube_connection": youtube_status.get("connected", False),
-        "youtube_default_privacy": youtube_status.get("default_privacy_status", "private"),
+        "youtube_default_privacy": youtube_status.get(
+            "default_privacy_status", "private"
+        ),
         "youtube_authorized_at": youtube_status.get("authorized_at"),
         "model": config.get("model", "gemini-2.5-flash"),
         "is_active": is_ai_enabled(),
@@ -1739,6 +2015,18 @@ def _build_ai_config_response() -> dict:
             if is_ai_enabled()
             else "Configure your API keys through environment variables or the encrypted admin store."
         ),
+        # Download auth (PO Token + OAuth2)
+        "ytdlp_pot_provider": pot_provider,
+        "ytdlp_pot_base_url": pot_base_url,
+        "ytdlp_pot_player_clients": str(
+            config.get("ytdlp_pot_player_clients", "mweb,web")
+        ),
+        "ytdlp_pot_server_healthy": pot_server_healthy,
+        "ytdlp_pot_server_running": pot_server_running,
+        "ytdlp_pot_server_can_start": pot_server_can_start,
+        "ytdlp_pot_docker_available": pot_docker_available,
+        "ytdlp_pot_node_available": pot_node_available,
+        "ytdlp_oauth2_enabled": bool(config.get("ytdlp_oauth2_enabled", False)),
     }
 
 
@@ -1751,7 +2039,7 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
         normalize_cookie_auto_sync_browser,
         normalize_cookie_auto_sync_interval_hours,
     )
-    
+
     # Quick format check for Gemini key (no live API call)
     if request.gemini_api_key:
         is_valid, message = check_api_key_format(request.gemini_api_key)
@@ -1767,14 +2055,24 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
     )
     normalized_privacy = request.youtube_default_privacy.strip().lower() or "private"
     if normalized_privacy not in VALID_PRIVACY_STATUSES:
-        raise HTTPException(status_code=400, detail="YouTube privacy must be private, unlisted, or public.")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="YouTube privacy must be private, unlisted, or public.",
+        )
+
     # Load existing config to preserve keys and automation credentials not updated by this endpoint
     existing = load_config()
     existing_cookie_sync_state = get_cookie_auto_sync_state(existing)
     youtube_client_changed = bool(
-        (request.youtube_client_id and request.youtube_client_id != existing.get("youtube_client_id", ""))
-        or (request.youtube_client_secret and request.youtube_client_secret != existing.get("youtube_client_secret", ""))
+        (
+            request.youtube_client_id
+            and request.youtube_client_id != existing.get("youtube_client_id", "")
+        )
+        or (
+            request.youtube_client_secret
+            and request.youtube_client_secret
+            != existing.get("youtube_client_secret", "")
+        )
     )
     auto_sync_enabled = (
         request.ytdlp_cookie_auto_sync_enabled
@@ -1800,9 +2098,12 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
     config = {
         "gemini_api_key": request.gemini_api_key or existing.get("gemini_api_key", ""),
         "groq_api_key": request.groq_api_key or existing.get("groq_api_key", ""),
-        "firecrawl_api_key": request.firecrawl_api_key or existing.get("firecrawl_api_key", ""),
-        "youtube_client_id": request.youtube_client_id or existing.get("youtube_client_id", ""),
-        "youtube_client_secret": request.youtube_client_secret or existing.get("youtube_client_secret", ""),
+        "firecrawl_api_key": request.firecrawl_api_key
+        or existing.get("firecrawl_api_key", ""),
+        "youtube_client_id": request.youtube_client_id
+        or existing.get("youtube_client_id", ""),
+        "youtube_client_secret": request.youtube_client_secret
+        or existing.get("youtube_client_secret", ""),
         "ytdlp_cookies_base64": (
             base64.b64encode(request.ytdlp_cookies.encode("utf-8")).decode("utf-8")
             if request.ytdlp_cookies.strip()
@@ -1822,9 +2123,9 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
     merged.update(config)
     if youtube_client_changed:
         merged.pop("youtube_oauth", None)
-    
+
     save_config(merged)
-    
+
     parts = []
     if config["gemini_api_key"]:
         parts.append("Gemini AI highlights")
@@ -1836,37 +2137,40 @@ def _apply_ai_config(request: AIConfigRequest) -> dict:
         parts.append("YouTube source downloads")
     if config["youtube_client_id"] and config["youtube_client_secret"]:
         parts.append("YouTube publishing")
-    
+
     feature_msg = " & ".join(parts) if parts else "No features"
-    
+
     return {
         "success": True,
         "ai_enabled": request.ai_enabled,
         "has_api_key": bool(config["gemini_api_key"]),
         "has_groq_key": bool(config["groq_api_key"]),
         "has_firecrawl_key": bool(config["firecrawl_api_key"]),
-        "has_youtube_client_config": bool(config["youtube_client_id"] and config["youtube_client_secret"]),
-        "has_youtube_connection": bool(merged.get("youtube_oauth", {}).get("refresh_token")),
+        "has_youtube_client_config": bool(
+            config["youtube_client_id"] and config["youtube_client_secret"]
+        ),
+        "has_youtube_connection": bool(
+            merged.get("youtube_oauth", {}).get("refresh_token")
+        ),
         "ytdlp_cookie_auto_sync_enabled": auto_sync_enabled,
         "ytdlp_cookie_auto_sync_browser": auto_sync_browser,
         "ytdlp_cookie_auto_sync_interval_hours": auto_sync_interval_hours,
         "ytdlp_cookie_auto_sync_on_sign_in": auto_sync_on_sign_in,
         "youtube_default_privacy": normalized_privacy,
         "model": request.model,
-        "message": f"Saved! Enabled: {feature_msg}." if request.ai_enabled else "AI features disabled."
+        "message": f"Saved! Enabled: {feature_msg}."
+        if request.ai_enabled
+        else "AI features disabled.",
     }
 
 
 def _validate_ai_key(request: AIValidateRequest) -> dict:
     """Validate a Gemini API key without saving it."""
     from .ai_engine import validate_api_key
-    
+
     is_valid, message = validate_api_key(request.api_key)
-    
-    return {
-        "valid": is_valid,
-        "message": message
-    }
+
+    return {"valid": is_valid, "message": message}
 
 
 @app.get("/ai/config")
@@ -1875,12 +2179,16 @@ async def get_ai_config(admin: ClerkUser = Depends(_require_admin_user)):
 
 
 @app.post("/ai/config")
-async def set_ai_config(request: AIConfigRequest, admin: ClerkUser = Depends(_require_admin_user)):
+async def set_ai_config(
+    request: AIConfigRequest, admin: ClerkUser = Depends(_require_admin_user)
+):
     return _apply_ai_config(request)
 
 
 @app.post("/ai/validate")
-async def validate_key(request: AIValidateRequest, admin: ClerkUser = Depends(_require_admin_user)):
+async def validate_key(
+    request: AIValidateRequest, admin: ClerkUser = Depends(_require_admin_user)
+):
     return _validate_ai_key(request)
 
 
@@ -1889,6 +2197,7 @@ async def admin_get_ai_config():
     """Expose admin config values for the standalone admin console."""
 
     from .ai_engine import load_config
+
     payload = _build_ai_config_response()
     config = load_config()
     payload["gemini_api_key"] = config.get("gemini_api_key", "")
@@ -1912,7 +2221,10 @@ async def admin_validate_key(request: AIValidateRequest):
 
 
 def _run_ytdlp_cookie_sync(reason: str) -> dict:
-    from .ytdlp_cookie_sync import maybe_sync_cookies_for_sign_in, sync_cookies_with_status
+    from .ytdlp_cookie_sync import (
+        maybe_sync_cookies_for_sign_in,
+        sync_cookies_with_status,
+    )
 
     normalized_reason = (reason or "manual").strip().lower()
     if normalized_reason == "login":
@@ -1925,13 +2237,19 @@ async def admin_sync_youtube_cookies(request: YouTubeCookieSyncRequest):
     result = _run_ytdlp_cookie_sync(request.reason)
     status_code = 200 if result.get("ok", False) else 500
     if status_code != 200:
-        raise HTTPException(status_code=status_code, detail=result.get("error") or result.get("message") or "Cookie sync failed.")
+        raise HTTPException(
+            status_code=status_code,
+            detail=result.get("error")
+            or result.get("message")
+            or "Cookie sync failed.",
+        )
     return result
 
 
 # ========================================
 # Cookie Config Endpoints (all authenticated users)
 # ========================================
+
 
 class CookieConfigRequest(BaseModel):
     ytdlp_cookies: str = ""
@@ -1943,14 +2261,22 @@ class CookieConfigRequest(BaseModel):
 
 def _build_cookie_config_response() -> dict:
     from .ai_engine import load_config
-    from .ytdlp_cookie_sync import browser_cookie_dependency_available, get_cookie_auto_sync_state
+    from .ytdlp_cookie_sync import (
+        browser_cookie_dependency_available,
+        get_cookie_auto_sync_state,
+        _playwright_available,
+        _is_firefox_available,
+    )
 
     config = load_config()
     cookie_sync_state = get_cookie_auto_sync_state(config)
 
     return {
         "has_ytdlp_cookies": bool(config.get("ytdlp_cookies_base64", "")),
-        "browser_cookie_import_supported": browser_cookie_dependency_available(),
+        "browser_cookie_import_supported": browser_cookie_dependency_available()
+        or _is_firefox_available(),
+        "firefox_available": _is_firefox_available(),
+        "playwright_available": _playwright_available(),
         **cookie_sync_state,
     }
 
@@ -2043,12 +2369,303 @@ async def sync_youtube_cookies(
     result = _run_ytdlp_cookie_sync(request.reason)
     status_code = 200 if result.get("ok", False) else 500
     if status_code != 200:
-        raise HTTPException(status_code=status_code, detail=result.get("error") or result.get("message") or "Cookie sync failed.")
+        raise HTTPException(
+            status_code=status_code,
+            detail=result.get("error")
+            or result.get("message")
+            or "Cookie sync failed.",
+        )
     return result
 
 
+# Playwright-based cookie sync (automated browser fallback)
+class PlaywrightCookieSyncRequest(BaseModel):
+    reason: str = "manual"
+    google_email: Optional[str] = None
+    google_password: Optional[str] = None
+
+
+def _run_playwright_cookie_sync(
+    reason: str,
+    google_email: Optional[str] = None,
+    google_password: Optional[str] = None,
+) -> dict:
+    from .ytdlp_cookie_sync import sync_cookies_with_playwright
+
+    return sync_cookies_with_playwright(
+        google_email=google_email,
+        google_password=google_password,
+        reason=reason,
+    )
+
+
+@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/cookies/sync-playwright")
+async def admin_sync_youtube_cookies_playwright(request: PlaywrightCookieSyncRequest):
+    try:
+        result = _run_playwright_cookie_sync(
+            request.reason, request.google_email, request.google_password
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return result
+
+
+@app.post("/youtube/cookies/sync-playwright")
+async def sync_youtube_cookies_playwright(
+    request: PlaywrightCookieSyncRequest,
+    user: ClerkUser = Depends(_require_app_user),
+):
+    try:
+        result = _run_playwright_cookie_sync(
+            request.reason, request.google_email, request.google_password
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return result
+
+
+# ========================================
+# Download Auth Endpoints (PO Token + OAuth2)
+# ========================================
+
+
+class DownloadAuthConfigRequest(BaseModel):
+    ytdlp_pot_provider: Optional[str] = None
+    ytdlp_pot_base_url: Optional[str] = None
+    ytdlp_pot_player_clients: Optional[str] = None
+    ytdlp_oauth2_enabled: Optional[bool] = None
+
+
+def _build_download_auth_status() -> dict:
+    from .ai_engine import load_config
+
+    config = load_config()
+    pot_provider = (
+        os.environ.get("SHORTMAKER_YTDLP_POT_PROVIDER", "").strip()
+        or str(config.get("ytdlp_pot_provider", "")).strip()
+        or "disabled"
+    )
+    pot_base_url = (
+        os.environ.get("SHORTMAKER_YTDLP_POT_BASE_URL", "").strip()
+        or str(config.get("ytdlp_pot_base_url", "")).strip()
+    )
+
+    # Check PO token server health
+    pot_server_healthy = None
+    if pot_provider == "http" and pot_base_url:
+        try:
+            import urllib.request
+
+            health_url = pot_base_url.rstrip("/") + "/ping"
+            req = urllib.request.Request(health_url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                pot_server_healthy = resp.status == 200
+        except Exception:
+            pot_server_healthy = False
+
+    # Server management capabilities
+    try:
+        from .pot_server import (
+            is_server_running as _pot_running,
+            get_server_status as _pot_status,
+            DEFAULT_PORT as _POT_PORT,
+        )
+
+        pot_server_info = _pot_status(port=_POT_PORT)
+    except Exception:
+        pot_server_info = {
+            "process_running": False,
+            "healthy": False,
+            "docker_image_available": False,
+            "native_installed": False,
+            "docker_available": False,
+            "node_available": False,
+        }
+
+    return {
+        "oauth2_enabled": bool(config.get("ytdlp_oauth2_enabled", False)),
+        "has_cookies": bool(config.get("ytdlp_cookies_base64", "")),
+        "pot_provider": pot_provider,
+        "pot_base_url": pot_base_url,
+        "pot_player_clients": str(config.get("ytdlp_pot_player_clients", "mweb,web")),
+        "pot_server_healthy": pot_server_healthy,
+        "pot_server_running": pot_server_info.get("process_running", False)
+        or pot_server_info.get("healthy") is True,
+        "pot_server_can_start": pot_server_info.get("docker_image_available", False)
+        or pot_server_info.get("native_installed", False),
+        "pot_docker_available": pot_server_info.get("docker_available", False),
+        "pot_node_available": pot_server_info.get("node_available", False),
+    }
+
+
+def _apply_download_auth_config(request: DownloadAuthConfigRequest) -> dict:
+    from .ai_engine import save_config, load_config
+
+    existing = load_config()
+    merged = existing.copy()
+
+    if request.ytdlp_pot_provider is not None:
+        merged["ytdlp_pot_provider"] = request.ytdlp_pot_provider.strip().lower()
+    if request.ytdlp_pot_base_url is not None:
+        merged["ytdlp_pot_base_url"] = request.ytdlp_pot_base_url.strip()
+    if request.ytdlp_pot_player_clients is not None:
+        merged["ytdlp_pot_player_clients"] = request.ytdlp_pot_player_clients.strip()
+    if request.ytdlp_oauth2_enabled is not None:
+        merged["ytdlp_oauth2_enabled"] = request.ytdlp_oauth2_enabled
+
+    save_config(merged)
+
+    status = _build_download_auth_status()
+    return {"success": True, "message": "Download auth settings saved.", **status}
+
+
+@app.get("/youtube/download-auth/status")
+async def get_download_auth_status(user: ClerkUser = Depends(_require_app_user)):
+    return _build_download_auth_status()
+
+
+@app.post("/youtube/download-auth/config")
+async def set_download_auth_config(
+    request: DownloadAuthConfigRequest,
+    user: ClerkUser = Depends(_require_app_user),
+):
+    return _apply_download_auth_config(request)
+
+
+@app.get("/youtube/download-auth/pot/health")
+async def check_pot_health(user: ClerkUser = Depends(_require_app_user)):
+    status = _build_download_auth_status()
+    if status["pot_provider"] == "disabled":
+        return {
+            "healthy": None,
+            "provider": "disabled",
+            "message": "No PO token provider configured.",
+        }
+    if status["pot_provider"] == "http":
+        return {
+            "healthy": status["pot_server_healthy"],
+            "provider": "http",
+            "base_url": status["pot_base_url"],
+            "message": "PO token server is reachable."
+            if status["pot_server_healthy"]
+            else "PO token server is not reachable.",
+        }
+    return {
+        "healthy": None,
+        "provider": status["pot_provider"],
+        "message": f"Provider '{status['pot_provider']}' does not support health checks.",
+    }
+
+
+@app.get(f"{ADMIN_ROUTE_PREFIX}/youtube/download-auth/status")
+async def admin_get_download_auth_status():
+    return _build_download_auth_status()
+
+
+@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/download-auth/config")
+async def admin_set_download_auth_config(request: DownloadAuthConfigRequest):
+    return _apply_download_auth_config(request)
+
+
+@app.get(f"{ADMIN_ROUTE_PREFIX}/youtube/download-auth/pot/health")
+async def admin_check_pot_health():
+    status = _build_download_auth_status()
+    if status["pot_provider"] == "disabled":
+        return {
+            "healthy": None,
+            "provider": "disabled",
+            "message": "No PO token provider configured.",
+        }
+    if status["pot_provider"] == "http":
+        return {
+            "healthy": status["pot_server_healthy"],
+            "provider": "http",
+            "base_url": status["pot_base_url"],
+            "message": "PO token server is reachable."
+            if status["pot_server_healthy"]
+            else "PO token server is not reachable.",
+        }
+    return {
+        "healthy": None,
+        "provider": status["pot_provider"],
+        "message": f"Provider '{status['pot_provider']}' does not support health checks.",
+    }
+
+
+# PO Token Server Management (auto-start bgutil HTTP server)
+
+
+@app.get("/youtube/download-auth/pot/server-status")
+async def get_pot_server_status(user: ClerkUser = Depends(_require_app_user)):
+    from .pot_server import get_server_status, DEFAULT_PORT
+
+    return get_server_status(port=DEFAULT_PORT)
+
+
+@app.post("/youtube/download-auth/pot/start")
+async def start_pot_server(user: ClerkUser = Depends(_require_app_user)):
+    from .pot_server import ensure_server_started, DEFAULT_PORT
+
+    result = ensure_server_started(port=DEFAULT_PORT)
+    if not result["started"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+
+    # Auto-save the base URL and provider into config
+    from .ai_engine import load_config, save_config
+
+    config = load_config()
+    config["ytdlp_pot_provider"] = "http"
+    config["ytdlp_pot_base_url"] = result["base_url"]
+    save_config(config)
+
+    return result
+
+
+@app.post("/youtube/download-auth/pot/stop")
+async def stop_pot_server(user: ClerkUser = Depends(_require_app_user)):
+    from .pot_server import stop_server
+
+    stop_server()
+    return {"stopped": True, "message": "PO Token server stopped."}
+
+
+@app.get(f"{ADMIN_ROUTE_PREFIX}/youtube/download-auth/pot/server-status")
+async def admin_get_pot_server_status():
+    from .pot_server import get_server_status, DEFAULT_PORT
+
+    return get_server_status(port=DEFAULT_PORT)
+
+
+@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/download-auth/pot/start")
+async def admin_start_pot_server():
+    from .pot_server import ensure_server_started, DEFAULT_PORT
+
+    result = ensure_server_started(port=DEFAULT_PORT)
+    if not result["started"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+
+    from .ai_engine import load_config, save_config
+
+    config = load_config()
+    config["ytdlp_pot_provider"] = "http"
+    config["ytdlp_pot_base_url"] = result["base_url"]
+    save_config(config)
+
+    return result
+
+
+@app.post(f"{ADMIN_ROUTE_PREFIX}/youtube/download-auth/pot/stop")
+async def admin_stop_pot_server():
+    from .pot_server import stop_server
+
+    stop_server()
+    return {"stopped": True, "message": "PO Token server stopped."}
+
+
 @app.post("/trends/discover")
-async def discover_trends(request: TrendDiscoverRequest, user: ClerkUser = Depends(_require_app_user)):
+async def discover_trends(
+    request: TrendDiscoverRequest, user: ClerkUser = Depends(_require_app_user)
+):
     from .trends import discover_trend_videos
 
     try:
@@ -2071,8 +2688,11 @@ async def discover_trends(request: TrendDiscoverRequest, user: ClerkUser = Depen
 
 
 @app.post("/trends/auto-process")
-async def auto_process_trend(request: TrendAutoProcessRequest, user: ClerkUser = Depends(_require_app_user)):
+async def auto_process_trend(
+    request: TrendAutoProcessRequest, user: ClerkUser = Depends(_require_app_user)
+):
     from .trends import auto_pick_trend_video
+
     _assert_daily_quota(user)
 
     try:
@@ -2102,7 +2722,9 @@ async def auto_process_trend(request: TrendAutoProcessRequest, user: ClerkUser =
 
 
 @app.get("/youtube/status")
-async def get_youtube_publish_status(request: Request, user: ClerkUser = Depends(_require_app_user)):
+async def get_youtube_publish_status(
+    request: Request, user: ClerkUser = Depends(_require_app_user)
+):
     from .youtube_publish import get_youtube_status
 
     try:
@@ -2112,15 +2734,23 @@ async def get_youtube_publish_status(request: Request, user: ClerkUser = Depends
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Failed to build YouTube status for user %s", getattr(user, "id", None))
-        raise HTTPException(status_code=500, detail="Failed to load YouTube status.") from exc
+        logger.exception(
+            "Failed to build YouTube status for user %s", getattr(user, "id", None)
+        )
+        raise HTTPException(
+            status_code=500, detail="Failed to load YouTube status."
+        ) from exc
 
 
 @app.post("/youtube/config")
-async def set_youtube_publish_config(request: YouTubeConfigRequest, user: ClerkUser = Depends(_require_app_user)):
+async def set_youtube_publish_config(
+    request: YouTubeConfigRequest, user: ClerkUser = Depends(_require_app_user)
+):
     from .youtube_publish import save_youtube_settings
 
-    _assert_secret_storage_ready(request.youtube_client_id, request.youtube_client_secret)
+    _assert_secret_storage_ready(
+        request.youtube_client_id, request.youtube_client_secret
+    )
     status = save_youtube_settings(
         client_id=request.youtube_client_id,
         client_secret=request.youtube_client_secret,
@@ -2135,12 +2765,16 @@ async def set_youtube_publish_config(request: YouTubeConfigRequest, user: ClerkU
 
 
 @app.post("/youtube/auth/start")
-async def start_youtube_auth(request: Request, user: ClerkUser = Depends(_require_app_user)):
+async def start_youtube_auth(
+    request: Request, user: ClerkUser = Depends(_require_app_user)
+):
     from .youtube_publish import build_authorization_url
 
     redirect_uri = _build_youtube_redirect_uri(request)
     try:
-        auth_url = build_authorization_url(redirect_uri, user_id=_youtube_scope_user_id(user))
+        auth_url = build_authorization_url(
+            redirect_uri, user_id=_youtube_scope_user_id(user)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
@@ -2176,17 +2810,27 @@ async def youtube_oauth_callback(
         )
 
     try:
-        complete_oauth_callback(code=code or "", state=state or "", redirect_uri=redirect_uri)
+        complete_oauth_callback(
+            code=code or "", state=state or "", redirect_uri=redirect_uri
+        )
     except ValueError as exc:
-        return HTMLResponse(build_callback_html(False, str(exc), origin), status_code=400)
+        return HTMLResponse(
+            build_callback_html(False, str(exc), origin), status_code=400
+        )
     except RuntimeError as exc:
-        return HTMLResponse(build_callback_html(False, str(exc), origin), status_code=503)
+        return HTMLResponse(
+            build_callback_html(False, str(exc), origin), status_code=503
+        )
     except Exception as exc:
         logger.exception("YouTube OAuth callback failed")
-        return HTMLResponse(build_callback_html(False, str(exc), origin), status_code=400)
+        return HTMLResponse(
+            build_callback_html(False, str(exc), origin), status_code=400
+        )
 
     return HTMLResponse(
-        build_callback_html(True, "YouTube account connected. You can return to ShortMaker.", origin)
+        build_callback_html(
+            True, "YouTube account connected. You can return to ShortMaker.", origin
+        )
     )
 
 
@@ -2240,7 +2884,9 @@ async def upload_shorts_to_youtube(
     from .youtube_publish import upload_short
 
     if not payload.uploads:
-        raise HTTPException(status_code=400, detail="No shorts were provided for upload.")
+        raise HTTPException(
+            status_code=400, detail="No shorts were provided for upload."
+        )
 
     uploads = []
     uploaded_count = 0
@@ -2250,11 +2896,13 @@ async def upload_shorts_to_youtube(
         safe_name = _safe_filename(item.filename)
         file_path = SHORTS_DIR / safe_name
         if not file_path.exists():
-            uploads.append({
-                "success": False,
-                "filename": item.filename,
-                "error": "Short file not found.",
-            })
+            uploads.append(
+                {
+                    "success": False,
+                    "filename": item.filename,
+                    "error": "Short file not found.",
+                }
+            )
             failed_count += 1
             continue
         if (
@@ -2262,11 +2910,13 @@ async def upload_shorts_to_youtube(
             and not _is_admin_console_user(user)
             and not result_file_belongs_to_user(user.id, safe_name)
         ):
-            uploads.append({
-                "success": False,
-                "filename": item.filename,
-                "error": "Short file not found.",
-            })
+            uploads.append(
+                {
+                    "success": False,
+                    "filename": item.filename,
+                    "error": "Short file not found.",
+                }
+            )
             failed_count += 1
             continue
 
@@ -2279,25 +2929,31 @@ async def upload_shorts_to_youtube(
                 privacy_status=item.privacy_status,
                 user_id=_youtube_scope_user_id(user),
             )
-            uploads.append({
-                "success": True,
-                "filename": item.filename,
-                **result,
-            })
+            uploads.append(
+                {
+                    "success": True,
+                    "filename": item.filename,
+                    **result,
+                }
+            )
             uploaded_count += 1
         except RuntimeError as exc:
-            uploads.append({
-                "success": False,
-                "filename": item.filename,
-                "error": str(exc),
-            })
+            uploads.append(
+                {
+                    "success": False,
+                    "filename": item.filename,
+                    "error": str(exc),
+                }
+            )
             failed_count += 1
         except HTTPException as exc:
-            uploads.append({
-                "success": False,
-                "filename": item.filename,
-                "error": str(exc.detail),
-            })
+            uploads.append(
+                {
+                    "success": False,
+                    "filename": item.filename,
+                    "error": str(exc.detail),
+                }
+            )
             failed_count += 1
 
     return {
@@ -2315,12 +2971,15 @@ async def get_capabilities():
         return _build_capabilities_payload(require_api_key=_is_api_auth_required())
     except Exception as exc:
         logger.exception("Failed to build capabilities payload.")
-        raise HTTPException(status_code=500, detail="Failed to load capabilities.") from exc
+        raise HTTPException(
+            status_code=500, detail="Failed to load capabilities."
+        ) from exc
 
 
 # ========================================
 # Admin Console Routes
 # ========================================
+
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/process", response_model=ProcessResponse)
 async def admin_start_processing(request: ProcessRequest):
@@ -2336,7 +2995,9 @@ async def admin_start_processing_upload(
     callback_token: Optional[str] = Form(default=None),
     callback_auth_header: str = Form(default="X-Callback-Token"),
     public_base_url: Optional[str] = Form(default=None),
-    callback_timeout_seconds: int = Form(default=DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS),
+    callback_timeout_seconds: int = Form(
+        default=DEFAULT_UPLOAD_CALLBACK_TIMEOUT_SECONDS
+    ),
 ):
     return await _queue_upload_job(
         file=file,
@@ -2352,7 +3013,9 @@ async def admin_start_processing_upload(
 
 @app.get(f"{ADMIN_ROUTE_PREFIX}/status/{{job_id}}")
 async def admin_get_status(job_id: str, request: Request):
-    return _get_job_payload(job_id, public_base_url=_resolve_public_base_url(request, ADMIN_ROUTE_PREFIX))
+    return _get_job_payload(
+        job_id, public_base_url=_resolve_public_base_url(request, ADMIN_ROUTE_PREFIX)
+    )
 
 
 @app.get(f"{ADMIN_ROUTE_PREFIX}/jobs/recent")
@@ -2367,7 +3030,9 @@ async def admin_get_recent_jobs(request: Request):
 
 @app.get(f"{ADMIN_ROUTE_PREFIX}/result/{{job_id}}")
 async def admin_get_result(job_id: str, request: Request):
-    return _get_completed_result_payload(job_id, _resolve_public_base_url(request, ADMIN_ROUTE_PREFIX))
+    return _get_completed_result_payload(
+        job_id, _resolve_public_base_url(request, ADMIN_ROUTE_PREFIX)
+    )
 
 
 @app.post(f"{ADMIN_ROUTE_PREFIX}/trends/discover")
@@ -2444,11 +3109,7 @@ async def admin_download_short(filename: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(
-        path=str(file_path),
-        filename=safe_name,
-        media_type="video/mp4"
-    )
+    return FileResponse(path=str(file_path), filename=safe_name, media_type="video/mp4")
 
 
 @app.get(f"{ADMIN_ROUTE_PREFIX}/capabilities")
@@ -2464,6 +3125,7 @@ async def admin_get_capabilities():
 # Frontend Serving
 # ========================================
 
+
 def _serve_spa_index() -> FileResponse:
     if not os.path.exists(WEB_DIST_INDEX_FILE):
         raise HTTPException(status_code=404, detail="Frontend build not found.")
@@ -2474,7 +3136,9 @@ def _serve_spa_index() -> FileResponse:
 
 
 if os.path.isdir(WEB_DIST_ASSETS_DIR):
-    app.mount("/assets", StaticFiles(directory=WEB_DIST_ASSETS_DIR), name="frontend-assets")
+    app.mount(
+        "/assets", StaticFiles(directory=WEB_DIST_ASSETS_DIR), name="frontend-assets"
+    )
 
 
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
@@ -2486,6 +3150,7 @@ async def serve_frontend_root():
 async def favicon():
     """Return empty favicon to prevent 404."""
     from fastapi.responses import Response
+
     return Response(content=b"", media_type="image/x-icon", status_code=204)
 
 
@@ -2493,17 +3158,19 @@ async def favicon():
 # Health Check
 # ========================================
 
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     try:
         from .ai_engine import is_ai_enabled
+
         ai_status = is_ai_enabled()
     except:
         ai_status = False
-    
+
     return {
-        "status": "healthy", 
+        "status": "healthy",
         "version": "3.0.0",
         "ai_enabled": ai_status,
         "database_enabled": database_enabled(),
@@ -2534,7 +3201,9 @@ async def serve_frontend(full_path: str):
         "favicon.ico",
         "assets/",
     )
-    if full_path in {"health", "openapi.json", "favicon.ico"} or full_path.startswith(blocked_prefixes):
+    if full_path in {"health", "openapi.json", "favicon.ico"} or full_path.startswith(
+        blocked_prefixes
+    ):
         raise HTTPException(status_code=404)
     return _serve_spa_index()
 
@@ -2545,4 +3214,5 @@ async def serve_frontend(full_path: str):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

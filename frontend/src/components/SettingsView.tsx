@@ -14,13 +14,16 @@ interface SettingsViewProps {
   onSyncYouTubeCookies: (reason?: 'manual' | 'login') => Promise<void>;
   onConnectYouTube: () => Promise<void>;
   onDisconnectYouTube: () => Promise<void>;
+  onStartPotServer: () => Promise<void>;
+  onStopPotServer: () => Promise<void>;
   saving: boolean;
   cookieSyncing: boolean;
   youtubeSaving: boolean;
+  potStarting: boolean;
 }
 
 const DEFAULT_PRIVACY = 'private';
-const DEFAULT_COOKIE_BROWSER: NonNullable<AdminConfig['ytdlp_cookie_auto_sync_browser']> = 'chrome';
+const DEFAULT_COOKIE_BROWSER: NonNullable<AdminConfig['ytdlp_cookie_auto_sync_browser']> = 'firefox';
 const DEFAULT_COOKIE_INTERVAL_HOURS = 24;
 
 export default function SettingsView({
@@ -35,9 +38,12 @@ export default function SettingsView({
   onSyncYouTubeCookies,
   onConnectYouTube,
   onDisconnectYouTube,
+  onStartPotServer,
+  onStopPotServer,
   saving,
   cookieSyncing,
   youtubeSaving,
+  potStarting,
 }: SettingsViewProps) {
   const [geminiKey, setGeminiKey] = useState('');
   const [groqKey, setGroqKey] = useState('');
@@ -363,7 +369,8 @@ export default function SettingsView({
           <div>
             <h3 className={styles.sectionTitle}>YouTube Download Session</h3>
             <p className={styles.sectionDesc}>
-              YouTube may block downloads without valid cookies. Paste a <code>cookies.txt</code> or sync from your browser to keep downloads working.
+              YouTube may block downloads without valid cookies. Use Firefox for reliable automatic sync,
+              or paste a <code>cookies.txt</code> manually from any browser.
             </p>
           </div>
         </div>
@@ -406,9 +413,9 @@ export default function SettingsView({
                 onChange={(e) => setCookieAutoSyncBrowser(e.target.value as typeof DEFAULT_COOKIE_BROWSER)}
                 disabled={!cookieAutoSyncEnabled}
               >
+                <option value="firefox">Firefox (Recommended)</option>
                 <option value="chrome">Chrome</option>
                 <option value="edge">Edge</option>
-                <option value="firefox">Firefox</option>
                 <option value="brave">Brave</option>
               </select>
             </label>
@@ -425,6 +432,18 @@ export default function SettingsView({
               />
             </label>
           </div>
+
+          {cookieAutoSyncEnabled && cookieAutoSyncBrowser !== 'firefox' && (
+            <p className={styles.cookieAutoSyncWarning}>
+              Chrome, Edge, and Brave use AppBound encryption (since Chrome 127+) that blocks
+              automatic cookie extraction. If sync fails, switch to Firefox or paste cookies manually.
+            </p>
+          )}
+          {cookieAutoSyncEnabled && cookieAutoSyncBrowser === 'firefox' && (
+            <p className={styles.keyHint}>
+              Firefox stores cookies without encryption, so automatic sync works reliably.
+            </p>
+          )}
 
           <label className={styles.cookieAutoSyncToggle}>
             <input
@@ -478,6 +497,83 @@ export default function SettingsView({
           )}
         </button>
       </form>
+
+      <div className={`card ${styles.section}`}>
+        <div className={styles.sectionHead}>
+          <span className={`material-symbols-outlined ${styles.sectionIcon} ${styles.iconViolet}`}>verified_user</span>
+          <div>
+            <h3 className={styles.sectionTitle}>PO Token (Auto Bypass Bot Detection)</h3>
+            <p className={styles.sectionDesc}>
+              A PO Token server automatically generates Proof-of-Origin tokens that YouTube requires to bypass
+              bot detection. This is the recommended approach used by cobalt.tools and Invidious.
+              {!config?.ytdlp_pot_server_can_start && !config?.ytdlp_pot_server_running && (
+                <> Install Docker or Node.js + bgutil-ytdlp-pot-provider to enable.</>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className={styles.cookieAutoSyncCard}>
+          {config?.ytdlp_pot_server_running ? (
+            <>
+              <div className={styles.potStatusRow}>
+                <span className={`${styles.potStatusDot} ${config.ytdlp_pot_server_healthy ? styles.potHealthy : styles.potUnhealthy}`} />
+                <span>
+                  {config.ytdlp_pot_server_healthy
+                    ? 'PO Token server is running and healthy.'
+                    : 'PO Token server is running but not responding to health checks.'}
+                </span>
+              </div>
+              <p className={styles.keyHint}>
+                Provider: {config.ytdlp_pot_provider} &middot; Base URL: {config.ytdlp_pot_base_url}
+              </p>
+              <div className={styles.cookieAutoSyncActions}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => { void onStopPotServer(); }}
+                >
+                  <span className="material-symbols-outlined">stop</span>
+                  Stop Server
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className={styles.keyHint}>
+                {config?.ytdlp_pot_provider === 'disabled'
+                  ? 'No PO Token server configured. Start one to automatically bypass YouTube bot detection.'
+                  : `Current provider: ${config?.ytdlp_pot_provider}. ${config?.ytdlp_pot_base_url ? `URL: ${config.ytdlp_pot_base_url}` : ''}`}
+              </p>
+              {config?.ytdlp_pot_server_can_start ? (
+                <div className={styles.cookieAutoSyncActions}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => { void onStartPotServer(); }}
+                    disabled={potStarting}
+                  >
+                    {potStarting ? (
+                      <><span className={`material-symbols-outlined ${styles.spinning}`}>autorenew</span>Starting…</>
+                    ) : (
+                      <><span className="material-symbols-outlined">play_arrow</span>
+                        Start PO Token Server
+                        {config?.ytdlp_pot_docker_available ? ' (Docker)' : config?.ytdlp_pot_node_available ? ' (Node.js)' : ''}
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <p className={styles.cookieAutoSyncWarning}>
+                  To enable automated PO Token generation, install one of:
+                  <br />A) Docker: <code>docker pull brainicism/bgutil-ytdlp-pot-provider</code>
+                  <br />B) Node.js: Clone <code>bgutil-ytdlp-pot-provider</code> and run <code>npm ci &amp;&amp; npx tsc</code>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       {isAdmin && config && (
         <>

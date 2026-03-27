@@ -737,6 +737,49 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
     }
   }, [authenticatedFetch, fetchAdminConfig, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
 
+  const [potStarting, setPotStarting] = useState(false);
+
+  const handleStartPotServer = useCallback(async () => {
+    setPotStarting(true);
+    try {
+      const endpoint = '/youtube/download-auth/pot/start';
+      const requestInit: RequestInit = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+      const res = isAdminConsoleRoute
+        ? await publicFetch(endpoint, requestInit)
+        : await authenticatedFetch(endpoint, requestInit);
+      const data = await readResponseBody(res, { endpoint, expectJson: true });
+      if (res?.ok) {
+        showNotice('success', data?.message || 'PO Token server started.');
+        fetchAdminConfig();
+      } else {
+        showNotice('error', data?.detail || data?.message || 'Failed to start PO Token server.');
+      }
+    } catch {
+      showNotice('error', 'Failed to start PO Token server.');
+    } finally {
+      setPotStarting(false);
+    }
+  }, [authenticatedFetch, fetchAdminConfig, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
+
+  const handleStopPotServer = useCallback(async () => {
+    try {
+      const endpoint = '/youtube/download-auth/pot/stop';
+      const requestInit: RequestInit = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+      const res = isAdminConsoleRoute
+        ? await publicFetch(endpoint, requestInit)
+        : await authenticatedFetch(endpoint, requestInit);
+      if (res?.ok) {
+        showNotice('info', 'PO Token server stopped.');
+        fetchAdminConfig();
+      } else {
+        const data = await readResponseBody(res, { endpoint, expectJson: true });
+        showNotice('error', data?.detail || 'Failed to stop PO Token server.');
+      }
+    } catch {
+      showNotice('error', 'Failed to stop PO Token server.');
+    }
+  }, [authenticatedFetch, fetchAdminConfig, isAdminConsoleRoute, publicFetch, readResponseBody, showNotice]);
+
   useEffect(() => {
     if (isAdminConsoleRoute) return;
     if (!backendSessionVerified || !session || !adminConfig?.ytdlp_cookie_auto_sync_on_sign_in) {
@@ -892,9 +935,12 @@ function AppContent({ adminStandalone = false, auth }: { adminStandalone?: boole
                   onSyncYouTubeCookies={handleSyncYouTubeCookies}
                   onConnectYouTube={handleConnectYouTube}
                   onDisconnectYouTube={handleDisconnectYouTube}
+                  onStartPotServer={handleStartPotServer}
+                  onStopPotServer={handleStopPotServer}
                   saving={settingsSaving}
                   cookieSyncing={cookieSyncing}
                   youtubeSaving={youtubeSaving}
+                  potStarting={potStarting}
                 />
               )}
             </div>

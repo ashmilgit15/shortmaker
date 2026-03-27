@@ -73,13 +73,25 @@ export interface AdminConfig {
   has_firecrawl_key?: boolean;
   has_ytdlp_cookies?: boolean;
   browser_cookie_import_supported?: boolean;
+  firefox_available?: boolean;
+  playwright_available?: boolean;
   ytdlp_cookie_auto_sync_enabled?: boolean;
-  ytdlp_cookie_auto_sync_browser?: 'chrome' | 'edge' | 'firefox' | 'brave';
+  ytdlp_cookie_auto_sync_browser?: 'firefox' | 'chrome' | 'edge' | 'brave';
   ytdlp_cookie_auto_sync_interval_hours?: number;
   ytdlp_cookie_auto_sync_on_sign_in?: boolean;
   ytdlp_cookie_last_synced_at?: string;
   ytdlp_cookie_last_sync_status?: 'idle' | 'success' | 'error' | string;
   ytdlp_cookie_last_sync_error?: string;
+  // Download auth (PO token + OAuth2)
+  ytdlp_pot_provider?: string;
+  ytdlp_pot_base_url?: string;
+  ytdlp_pot_player_clients?: string;
+  ytdlp_pot_server_healthy?: boolean | null;
+  ytdlp_pot_server_running?: boolean;
+  ytdlp_pot_server_can_start?: boolean;
+  ytdlp_pot_docker_available?: boolean;
+  ytdlp_pot_node_available?: boolean;
+  ytdlp_oauth2_enabled?: boolean;
   has_youtube_client_config?: boolean;
   has_youtube_connection?: boolean;
   youtube_default_privacy?: string;

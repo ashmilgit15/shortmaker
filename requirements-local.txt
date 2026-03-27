@@ -6,3 +6,6 @@
 torch
 torchaudio
 openai-whisper==20250625
+
+# Playwright for automated browser cookie extraction (optional)
+# playwright

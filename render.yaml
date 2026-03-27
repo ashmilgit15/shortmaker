@@ -46,6 +46,8 @@ services:
         sync: false
       - key: SHORTMAKER_YTDLP_COOKIES_BASE64
         sync: false
+      - key: SHORTMAKER_YTDLP_POT_TOKEN_TTL
+        value: "12"
       - key: SHORTMAKER_VIDEO_PRESET
         value: "veryfast"
       - key: SHORTMAKER_VIDEO_CRF
