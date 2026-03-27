@@ -7,15 +7,16 @@ BGUTIL_SERVER="/opt/bgutil-ytdlp-pot-provider/server/build/main.js"
 BGUTIL_MAX_RETRIES=10
 
 # Start bgutil PO Token HTTP server in the background if available
+# IMPORTANT: Bind to 127.0.0.1 only so Render doesn't expose it publicly
 start_bgutil() {
   if [ ! -f "$BGUTIL_SERVER" ] || ! command -v node >/dev/null 2>&1; then
     echo "[shortmaker] bgutil not available — downloads will rely on player client fallbacks."
     return 1
   fi
 
-  echo "[shortmaker] Starting bgutil PO Token server on port ${BGUTIL_PORT}..."
+  echo "[shortmaker] Starting bgutil PO Token server on 127.0.0.1:${BGUTIL_PORT}..."
   TOKEN_TTL="${SHORTMAKER_YTDLP_POT_TOKEN_TTL:-12}" \
-  node "$BGUTIL_SERVER" --port "${BGUTIL_PORT}" &
+  node "$BGUTIL_SERVER" --port "${BGUTIL_PORT}" --bind 127.0.0.1 &
   BGUTIL_PID=$!
   echo "[shortmaker] bgutil process started (PID $BGUTIL_PID)"
 
@@ -23,7 +24,7 @@ start_bgutil() {
   i=0
   while [ $i -lt $BGUTIL_MAX_RETRIES ]; do
     if curl -sf "http://127.0.0.1:${BGUTIL_PORT}/ping" >/dev/null 2>&1; then
-      echo "[shortmaker] bgutil PO Token server is healthy on port ${BGUTIL_PORT}."
+      echo "[shortmaker] bgutil PO Token server is healthy on 127.0.0.1:${BGUTIL_PORT}."
       return 0
     fi
     i=$((i + 1))

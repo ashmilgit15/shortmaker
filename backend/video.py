@@ -232,12 +232,12 @@ def _build_bot_detection_error(original_exc: Exception) -> RuntimeError:
 
     if not has_cookies and not pot_healthy:
         suggestion = (
-            "YouTube is blocking downloads from this server (datacenter IP detected). "
-            "To fix this:\n"
-            "1. Set cookies: Export cookies from Firefox on your local machine "
-            "(use 'cookies.txt' format), then set the SHORTMAKER_YTDLP_COOKIES_BASE64 "
-            "environment variable in your deployment settings.\n"
-            "2. Or set up a PO Token provider that can generate valid tokens from this IP."
+            "YouTube is blocking downloads from this server. "
+            "To fix this, the admin needs to run the cookie sync script from a local machine:\n\n"
+            "  pip install httpx\n"
+            "  python scripts/cookie_auto_sync.py --base-url https://your-app.onrender.com\n\n"
+            "This reads YouTube cookies from Firefox and uploads them to the server. "
+            "Run it once to set up, then it syncs automatically every hour."
         )
     elif not has_cookies:
         suggestion = (
