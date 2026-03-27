@@ -75,9 +75,7 @@ def _build_youtube_extractor_args() -> dict:
         player_clients_raw = str(config_pot.get("ytdlp_pot_player_clients", "")).strip()
     player_clients = [
         c.strip()
-        for c in (player_clients_raw or "tv_embedded,android_embedded,mweb,web").split(
-            ","
-        )
+        for c in (player_clients_raw or "tv_embedded,web_creator,mweb,web").split(",")
         if c.strip()
     ]
 
