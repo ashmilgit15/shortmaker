@@ -574,6 +574,20 @@ def download_video(url: str, output_dir: str) -> dict:
             break
 
     if last_error is not None:
+        # All yt-dlp attempts failed — try Playwright as last resort
+        try:
+            from .yt_playwright import is_playwright_available, download_with_playwright
+
+            if is_playwright_available():
+                logger.warning(
+                    "yt-dlp failed (%s) — attempting Playwright browser download...",
+                    last_error,
+                )
+                return download_with_playwright(url, output_dir)
+        except ImportError:
+            pass
+        except Exception as pw_exc:
+            logger.error("Playwright download also failed: %s", pw_exc)
         raise last_error
 
     # Find the downloaded file
