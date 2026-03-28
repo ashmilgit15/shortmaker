@@ -16,13 +16,10 @@ logger = logging.getLogger(__name__)
 YT_DLP_JS_RUNTIMES = {"node": {"timeout": 30}}
 YTDLP_FORMAT = os.environ.get(
     "SHORTMAKER_YTDLP_FORMAT",
-    "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/"
-    "bv*[height<=1080]+ba/"
-    "b[height<=1080][ext=mp4]/b[height<=1080]/best",
+    "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
 )
 YTDLP_FALLBACK_FORMATS = [
-    "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]",
-    "bv*+ba/b",
+    "bestvideo+bestaudio/best",
     "best",
 ]
 YTDLP_RETRIES = int(os.environ.get("SHORTMAKER_YTDLP_RETRIES", "6"))
@@ -75,7 +72,7 @@ def _build_youtube_extractor_args() -> dict:
         player_clients_raw = str(config_pot.get("ytdlp_pot_player_clients", "")).strip()
     player_clients = [
         c.strip()
-        for c in (player_clients_raw or "tv_embedded,web_creator,mweb,web").split(",")
+        for c in (player_clients_raw or "web_creator,web").split(",")
         if c.strip()
     ]
 
@@ -482,6 +479,8 @@ def download_video(url: str, output_dir: str) -> dict:
 
                     # Round 1: Try fallback clients WITH PO Token provider
                     fallback_clients = [
+                        "web_creator",
+                        "web_music",
                         "tv_embedded",
                         "android_vr",
                         "android_embedded",
@@ -513,10 +512,14 @@ def download_video(url: str, output_dir: str) -> dict:
                         except yt_dlp.utils.DownloadError:
                             continue
 
-                    # Round 2: Nuclear fallback — try embedded clients WITHOUT
+                    # Round 2: Nuclear fallback — try clients WITHOUT
                     # any PO Token provider (some work without tokens)
                     if not bot_bypassed:
-                        bare_clients = ["tv_embedded", "android_embedded"]
+                        bare_clients = [
+                            "web_creator",
+                            "tv_embedded",
+                            "android_embedded",
+                        ]
                         for client_name in bare_clients:
                             logger.info(
                                 "Bot detection still active — "
