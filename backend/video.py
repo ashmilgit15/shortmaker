@@ -574,20 +574,33 @@ def download_video(url: str, output_dir: str) -> dict:
             break
 
     if last_error is not None:
-        # All yt-dlp attempts failed — try Playwright as last resort
+        # All yt-dlp attempts failed — try fallbacks
+        # 1. pytubefix (lightweight InnerTube API)
+        try:
+            from .yt_playwright import is_pytubefix_available, download_with_pytubefix
+
+            if is_pytubefix_available():
+                logger.warning("yt-dlp failed — attempting pytubefix download...")
+                return download_with_pytubefix(url, output_dir)
+        except ImportError:
+            pass
+        except Exception as pt_exc:
+            logger.error("pytubefix download failed: %s", pt_exc)
+
+        # 2. Playwright (heavy, needs RAM)
         try:
             from .yt_playwright import is_playwright_available, download_with_playwright
 
             if is_playwright_available():
                 logger.warning(
-                    "yt-dlp failed (%s) — attempting Playwright browser download...",
-                    last_error,
+                    "pytubefix failed — attempting Playwright browser download..."
                 )
                 return download_with_playwright(url, output_dir)
         except ImportError:
             pass
         except Exception as pw_exc:
-            logger.error("Playwright download also failed: %s", pw_exc)
+            logger.error("Playwright download failed: %s", pw_exc)
+
         raise last_error
 
     # Find the downloaded file

@@ -32,10 +32,8 @@ COPY requirements.txt requirements.txt
 RUN python -m pip install --upgrade pip \
   && pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright + Chromium for browser-based YouTube downloads
-RUN pip install --no-cache-dir playwright \
-  && playwright install chromium \
-  && playwright install-deps chromium
+# Install Playwright (for browser automation, Chromium not needed for YouTube downloads)
+RUN pip install --no-cache-dir playwright
 
 ARG BGUTIL_POT_PROVIDER_REF=1.3.1
 RUN git clone --depth 1 --branch ${BGUTIL_POT_PROVIDER_REF} \
